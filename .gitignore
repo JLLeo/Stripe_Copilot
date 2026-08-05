@@ -1,11 +1,20 @@
+# Virtual environments
+.venv/
 venv/
 
+# Python
 __pycache__/
-
 *.pyc
+.pytest_cache/
 
+# Secrets
 .env
 
+# OS
 .DS_Store
 
+# Local tooling / agent config
+.claude/
+
+# Personal notes — not for the repo
 INTERVIEW.md
