@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stripe Sales Copilot</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e1e4e8;display:flex;height:100vh}
+
+/* Sidebar */
+#sidebar{width:260px;background:#161b22;border-right:1px solid #30363d;display:flex;flex-direction:column;padding:16px;gap:16px;flex-shrink:0}
+#sidebar h2{font-size:16px;color:#58a6ff;margin-bottom:4px}
+#sidebar label{font-size:12px;color:#8b949e;margin-bottom:2px}
+#sidebar input,#sidebar select{width:100%;padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e1e4e8;font-size:13px}
+#sidebar input:focus,#sidebar select:focus{outline:none;border-color:#58a6ff}
+#sidebar .info{font-size:11px;color:#8b949e;margin-top:auto}
+#sidebar .info span{color:#58a6ff}
+
+/* Chat */
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+
+/* Message bubbles */
+.msg-user{background:#1c2333;border:1px solid #30363d;border-radius:12px;padding:12px 16px;align-self:flex-end;max-width:70%;font-size:14px}
+
+/* Pipeline — always visible, compact */
+.msg-pipeline{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:10px 14px;max-width:85%;font-size:12px}
+.msg-pipeline .stage{display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:12px;line-height:1.5}
+.msg-pipeline .stage .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.msg-pipeline .stage .dot.done{background:#3fb950}
+.msg-pipeline .stage .dot.active{background:#58a6ff;animation:pulse 1s infinite}
+.msg-pipeline .stage .dot.error{background:#f85149}
+.msg-pipeline .stage .dot.pending{background:#30363d}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.msg-pipeline .tool-detail{background:#0d1117;border-radius:4px;padding:5px 10px;margin:2px 0 2px 16px;font-size:11px;font-family:'SF Mono',Consolas,monospace;max-height:100px;overflow-y:auto;white-space:pre-wrap;color:#8b949e;border-left:2px solid #30363d}
+.msg-pipeline .done-marker{display:inline-block;color:#3fb950;font-weight:600;font-size:11px;margin-left:4px}
+
+/* Client response — main output */
+.msg-client{background:#0d3320;border:1px solid #1a7f3c;border-radius:12px;padding:14px 18px;font-size:14px;max-width:85%;color:#7ee787;position:relative}
+.msg-client .label{font-size:10px;text-transform:uppercase;color:#3fb950;margin-bottom:6px;letter-spacing:0.5px;font-weight:600}
+.msg-client .copy-btn{position:absolute;top:10px;right:14px;background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px}
+.msg-client .copy-btn:hover{color:#e1e4e8;border-color:#58a6ff}
+
+/* Internal — collapsible */
+.msg-internal{margin-top:6px;max-width:85%}
+.msg-internal summary{font-size:11px;color:#8b949e;cursor:pointer;padding:6px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;user-select:none}
+.msg-internal summary:hover{color:#e1e4e8;border-color:#30363d}
+.msg-internal .body{background:#0d1117;border:1px solid #21262d;border-top:none;border-radius:0 0 6px 6px;padding:10px 14px;font-size:12px;color:#8b949e;white-space:pre-wrap;max-height:300px;overflow-y:auto;line-height:1.5}
+
+/* Escalation badge */
+.msg-escalation{background:#2d1a1a;border:1px solid #f85149;border-radius:8px;padding:10px 14px;font-size:12px;color:#f85149;max-width:85%}
+.msg-escalation .team{font-weight:600;font-size:13px}
+
+/* Error */
+.msg-error{background:#2d1a1a;border:1px solid #f85149;border-radius:8px;padding:8px 12px;font-size:12px;color:#f85149;max-width:85%}
+
+/* Sources */
+.msg-sources{font-size:10px;color:#484f58;max-width:85%;padding:4px 8px}
+
+/* Stage label colors */
+.s-intent{color:#d2a8ff}
+.s-skill{color:#79c0ff}
+.s-think{color:#ffa657}
+.s-act{color:#56d364}
+.s-observe{color:#7ee787}
+.s-synth{color:#f778ba}
+.s-esc{color:#f85149}
+.s-error{color:#f85149}
+
+/* Input */
+#input-area{display:flex;gap:10px;padding:16px 20px;background:#161b22;border-top:1px solid #30363d}
+#input-area input{flex:1;padding:10px 16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e1e4e8;font-size:14px}
+#input-area input:focus{outline:none;border-color:#58a6ff}
+#input-area button{padding:10px 20px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:14px;cursor:pointer;font-weight:600}
+#input-area button:hover{background:#2ea043}
+#input-area button:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:#0d1117}
+::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <h2>Sales Copilot</h2>
+  <div>
+    <label>Sales Rep ID</label>
+    <input id="repId" value="rep_001" placeholder="Sales rep ID">
+  </div>
+  <div>
+    <label>Customer</label>
+    <select id="customerId"><option value="">(none)</option></select>
+  </div>
+  <div>
+    <label>Session</label>
+    <input id="sessionId" readonly style="font-size:11px;font-family:monospace">
+    <button onclick="newSession()" style="margin-top:4px;background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px;width:100%">New Session</button>
+  </div>
+  <div class="info">
+    Session turns: <span id="turnCount">0</span><br>
+    Model: GPT-4o-mini<br>
+    Embedding: text-embedding-3-small
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <div id="messages"></div>
+  <div id="input-area">
+    <input id="queryInput" placeholder="Ask about Stripe products, pricing, security..."
+           onkeydown="if(event.key==='Enter')send()">
+    <button id="sendBtn" onclick="send()">Send</button>
+  </div>
+</div>
+
+<script>
+// =========================================================================
+// State
+// =========================================================================
+const DEFAULT_REP = 'rep_001';
+let currentPipeline = null;
+
+function getSessionId() {
+  let sid = localStorage.getItem('ssc_session_id');
+  if (!sid) { sid = crypto.randomUUID(); localStorage.setItem('ssc_session_id', sid); }
+  return sid;
+}
+function newSession() {
+  localStorage.removeItem('ssc_session_id');
+  document.getElementById('sessionId').value = getSessionId();
+  document.getElementById('turnCount').textContent = '0';
+  document.getElementById('messages').innerHTML = '';
+}
+
+document.getElementById('repId').value = localStorage.getItem('ssc_rep_id') || DEFAULT_REP;
+document.getElementById('repId').onchange = () => localStorage.setItem('ssc_rep_id', document.getElementById('repId').value);
+document.getElementById('sessionId').value = getSessionId();
+document.getElementById('customerId').onchange = () => localStorage.setItem('ssc_customer', document.getElementById('customerId').value);
+
+fetch('/api/customers').then(r=>r.json()).then(list=>{
+  const sel = document.getElementById('customerId');
+  list.forEach(c=>{
+    const opt = document.createElement('option');
+    opt.value = c.customer_id;
+    opt.textContent = `${c.customer_name} (${c.industry||'?'}${c.annual_payment_volume ? ', $'+ (c.annual_payment_volume/1e6).toFixed(1)+'M' : ''})`;
+    sel.appendChild(opt);
+  });
+  const saved = localStorage.getItem('ssc_customer');
+  if (saved) sel.value = saved;
+});
+
+// =========================================================================
+// Send
+// =========================================================================
+function send() {
+  const input = document.getElementById('queryInput');
+  const query = input.value.trim();
+  if (!query) return;
+
+  const repId = document.getElementById('repId').value || DEFAULT_REP;
+  const customerId = document.getElementById('customerId').value;
+  const sessionId = document.getElementById('sessionId').value;
+
+  input.value = '';
+  document.getElementById('sendBtn').disabled = true;
+
+  addUserBubble(query);
+  currentPipeline = addPipeline();
+
+  fetch('/sales-agent/stream', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sales_rep_id:repId,customer_id:customerId,session_id:sessionId,message:query})
+  }).then(async resp => {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', evt = '', dat = '';
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const lines = buf.split('\n');
+      buf = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) { evt = line.slice(7).trim(); }
+        else if (line.startsWith('data: ')) { dat = line.slice(6); }
+        else if (line === '' && evt) {
+          try { handleEvent(evt, JSON.parse(dat)); } catch(e){}
+          evt = ''; dat = '';
+        } else if (line !== '') { buf = line; }
+      }
+    }
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('turnCount').textContent = parseInt(document.getElementById('turnCount').textContent) + 1;
+  }).catch(err => {
+    addStep(currentPipeline, 'error', `Connection failed: ${err.message}`);
+    document.getElementById('sendBtn').disabled = false;
+  });
+}
+
+// =========================================================================
+// SSE Event handlers
+// =========================================================================
+function handleEvent(evt, data) {
+  switch (evt) {
+    case 'intent':    addStep(currentPipeline, 'intent', data); break;
+    case 'skill':     addStep(currentPipeline, 'skill', data); break;
+    case 'think':     addStep(currentPipeline, 'think', data); break;
+    case 'act':       addStep(currentPipeline, 'act', data); break;
+    case 'observe':   addStep(currentPipeline, 'observe', data); break;
+    case 'synth':     addStep(currentPipeline, 'synth', data); break;
+    case 'escalation':addStep(currentPipeline, 'escalation', data); break;
+    case 'done':      handleDone(currentPipeline, data); break;
+    case 'error':     addStep(currentPipeline, 'error', data); break;
+  }
+}
+
+// =========================================================================
+// Pipeline step rendering
+// =========================================================================
+function addStep(pipe, type, data) {
+  if (!pipe) return;
+
+  if (type === 'intent') {
+    let html = `<span class="dot done"></span><b class="s-intent">INTENT</b> ${data.display_name} <span style="color:#8b949e">(${data.method}, ${(data.confidence||0).toFixed(2)})</span>`;
+    if (data.context_used) html += ' <span style="color:#8b949e;font-size:10px">[context]</span>';
+    append(pipe, html);
+  }
+  else if (type === 'skill') {
+    append(pipe, `<span class="dot done"></span><b class="s-skill">SKILL</b> ${data.name} | max=${data.max_iterations} | tools=[${(data.required_tools||[]).concat(data.optional_tools||[]).join(', ')}]`);
+  }
+  else if (type === 'think') {
+    if (data.status === 'thinking') {
+      append(pipe, `<span class="dot active"></span><b class="s-think">THINK</b> iter ${data.iteration}...`);
+    } else if (data.decision === 'forced') {
+      let h = `<span class="dot active"></span><b class="s-think">THINK</b> iter ${data.iteration}: LLM tried to stop <span style="color:#f85149">FORCING</span> <code>${data.forced_tool}</code>`;
+      append(pipe, h);
+      if (data.missing_required) {
+        const d = document.createElement('div'); d.className = 'tool-detail';
+        d.textContent = 'Missing required: ' + data.missing_required.join(', ');
+        pipe.appendChild(d);
+      }
+    } else if (data.decision === 'call_tool') {
+      append(pipe, `<span class="dot active"></span><b class="s-think">THINK</b> iter ${data.iteration}: call <code>${data.tool_name}</code>`);
+    } else {
+      append(pipe, `<span class="dot done"></span><b class="s-think">THINK</b> iter ${data.iteration}: ready <span class="done-marker">DONE</span>`);
+    }
+  }
+  else if (type === 'act') {
+    let h = `<span class="dot ${data.is_error?'error':'done'}"></span><b class="s-act">ACT</b> iter ${data.iteration}: <code>${data.tool_name}</code>`;
+    if (data.is_error) h += ' <span style="color:#f85149">ERROR</span>';
+    append(pipe, h);
+    if (data.output_preview) {
+      const d = document.createElement('div'); d.className = 'tool-detail';
+      d.textContent = data.output_preview;
+      pipe.appendChild(d);
+    }
+  }
+  else if (type === 'observe') {
+    append(pipe, `<span class="dot done"></span><b class="s-observe">OBSERVE</b> iter ${data.iteration}: called=[${(data.called||[]).join(',')}] missing=[${(data.missing_required||[]).join(',')||'none'}]`);
+  }
+  else if (type === 'synth') {
+    if (data.status === 'generating') {
+      append(pipe, `<span class="dot active"></span><b class="s-synth">SYNTH</b> generating responses...`);
+    } else {
+      append(pipe, `<span class="dot done"></span><b class="s-synth">SYNTH</b> done <span class="done-marker">DONE</span>`);
+    }
+  }
+  else if (type === 'escalation') {
+    if (data.should_escalate) {
+      append(pipe, `<span class="dot error"></span><b class="s-esc">ESCALATE</b> Routing to <b>${data.escalation_team}</b> <span class="done-marker">PENDING</span>`);
+    } else {
+      append(pipe, `<span class="dot done"></span><b class="s-esc">ESCALATE</b> no escalation needed`);
+    }
+  }
+  else if (type === 'error') {
+    append(pipe, `<span class="dot error"></span><b class="s-error">ERROR</b> ${data.stage||''}: ${data.message}`);
+  }
+  scrollDown();
+}
+
+// =========================================================================
+// Done — show client response + collapsible internal
+// =========================================================================
+function handleDone(pipe, data) {
+  if (pipe) {
+    pipe.querySelectorAll('.dot.active').forEach(d => { d.className = 'dot done'; });
+  }
+
+  // --- Escalation pending: ask user first ---
+  if (data.escalation_pending && data.escalation_team) {
+    const escDiv = document.createElement('div');
+    escDiv.className = 'msg-escalation';
+    escDiv.style.padding = '16px';
+    escDiv.innerHTML = `
+      <div style="font-size:14px;margin-bottom:8px">ESCALATE to <b>${data.escalation_team}</b>?</div>
+      <div style="font-size:11px;color:#8b949e;margin-bottom:12px">The agent recommends escalating this to ${data.escalation_team}. Do you want to connect?</div>
+      <button onclick="confirmEscalation(this, '${data.escalation_team}', '${data.session_id || ''}')"
+              style="background:#238636;border:none;color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px">
+        Connect to ${data.escalation_team}
+      </button>
+      <button onclick="this.parentElement.remove(); showClientResponse()"
+              style="background:#21262d;border:1px solid #30363d;color:#8b949e;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px">
+        No, thanks
+      </button>
+    `;
+    document.getElementById('messages').appendChild(escDiv);
+    // Store data for later
+    escDiv._doneData = data;
+  } else {
+    showDoneContent(data);
+  }
+
+  currentPipeline = null;
+  scrollDown();
+}
+
+function showDoneContent(data) {
+  if (data.client_ready_response) {
+    const client = document.createElement('div');
+    client.className = 'msg-client';
+    client.innerHTML = `<div class="label">CLIENT-READY RESPONSE</div>${escapeHtml(data.client_ready_response)}`;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn'; btn.textContent = 'Copy';
+    btn.onclick = () => { navigator.clipboard.writeText(data.client_ready_response); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1500); };
+    client.appendChild(btn);
+    document.getElementById('messages').appendChild(client);
+  }
+  if (data.internal_answer) {
+    const det = document.createElement('details');
+    det.className = 'msg-internal';
+    det.open = false;
+    det.innerHTML = `<summary>INTERNAL ANSWER (sales rep view) — click to expand</summary><div class="body">${escapeHtml(data.internal_answer)}</div>`;
+    document.getElementById('messages').appendChild(det);
+  }
+  if (data.sources && data.sources.length) {
+    const src = document.createElement('div');
+    src.className = 'msg-sources';
+    src.textContent = 'Sources: ' + data.sources.join(', ');
+    document.getElementById('messages').appendChild(src);
+  }
+  scrollDown();
+}
+
+function confirmEscalation(btn, team, sessionId) {
+  const escDiv = btn.parentElement;
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+
+  fetch('/sales-agent/confirm-escalation', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sales_rep_id:'',customer_id:'',session_id:sessionId,message:team})
+  }).then(r=>r.json()).then(resp=>{
+    escDiv.innerHTML = `
+      <div style="font-size:14px;color:#3fb950;margin-bottom:6px">CONNECTED to ${team}</div>
+      <div style="font-size:12px;color:#8b949e">${resp.message}</div>
+    `;
+    escDiv.className = 'msg-client';
+  }).catch(()=>{
+    escDiv.innerHTML = `
+      <div style="font-size:14px;color:#3fb950;margin-bottom:6px">CONNECTED to ${team}</div>
+      <div style="font-size:12px;color:#8b949e">You are now connected. A representative will take over shortly.</div>
+    `;
+    escDiv.className = 'msg-client';
+  });
+
+  // Show the client response content below
+  if (escDiv._doneData) showDoneContent(escDiv._doneData);
+}
+
+function showClientResponse() {
+  // Called when user declines escalation — show the stored client response
+  // The done data is already on the escalation div
+  const escDivs = document.querySelectorAll('.msg-escalation');
+  escDivs.forEach(d => { if (d._doneData) showDoneContent(d._doneData); });
+}
+
+// =========================================================================
+// DOM helpers
+// =========================================================================
+function addUserBubble(text) {
+  const d = document.createElement('div');
+  d.className = 'msg-user';
+  d.textContent = text;
+  document.getElementById('messages').appendChild(d);
+  scrollDown();
+}
+
+function addPipeline() {
+  const d = document.createElement('div');
+  d.className = 'msg-pipeline';
+  d.id = 'pipe-' + Date.now();
+  document.getElementById('messages').appendChild(d);
+  scrollDown();
+  return d;
+}
+
+function append(pipe, html) {
+  const s = document.createElement('div');
+  s.className = 'stage';
+  s.innerHTML = html;
+  pipe.appendChild(s);
+  scrollDown();
+}
+
+function scrollDown() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
