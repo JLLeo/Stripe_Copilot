@@ -2,8 +2,15 @@
 Quick test: query Milvus directly and inspect retrieved chunks.
 
 Usage:
-    python test_milvus.py
+    python tests/integration/test_milvus.py
 """
+
+
+import sys as _sys
+from pathlib import Path as _Path
+
+# Runnable from anywhere: put the project root on sys.path before importing app.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
 
 from pymilvus import MilvusClient
 from langchain_openai import OpenAIEmbeddings
@@ -11,7 +18,7 @@ from langchain_openai import OpenAIEmbeddings
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-MILVUS_DB = "milvus.db"
+MILVUS_DB = str(_Path(__file__).resolve().parent.parent.parent / "milvus.db")
 COLLECTION = "stripe_sales_knowledge"
 
 # ---------------------------------------------------------------------------

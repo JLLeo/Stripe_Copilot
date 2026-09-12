@@ -10,6 +10,8 @@ Generic questions like "What is Stripe Connect?" NEVER escalate.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 
 from app.database import get_customer
@@ -78,6 +80,72 @@ TEAM_ROUTING: dict[str, str] = {
 }
 
 
+_DEFAULT_TEAM = "Sales Ops / Human Agent"
+_NULLISH = {"", "null", "none", "n/a", "nil", "undefined"}
+
+
+# ---------------------------------------------------------------------------
+# Flexible "I want a human" detection
+#
+# The literal trigger list only matches exact phrases, so natural variants
+# fall through on a single missing word: "talk to human" does not contain
+# "talk to a human". These patterns match the *shape* of the request —
+# verb + optional article/adjective + a person-noun — instead of the exact
+# wording. They still require real evidence in the query, so a misclassified
+# escalation_request ("Can you help me understand billing?") stays put.
+# ---------------------------------------------------------------------------
+_ARTICLE = r"(?:(?:a|an|the|your|some|another)\s+)?"
+_ADJ = r"(?:(?:real|live|actual|human|different|other)\s+)?"
+_PERSON = (
+    r"(?:human(?:\s+being)?|person|people|agent|representative|rep|"
+    r"manager|supervisor|specialist|advisor|someone|somebody|"
+    r"sales\s+team|account\s+manager|team\s+member)"
+)
+_TARGET = _ARTICLE + _ADJ + _PERSON
+
+_HUMAN_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        # "talk to a human", "speak with someone", "chat to a rep"
+        r"\b(?:talk|speak|chat)(?:ing)?\s+(?:to|with)\s+" + _TARGET,
+        # "connect me to a real person", "transfer me to your manager"
+        r"\b(?:connect|transfer|route|escalate|refer|forward|send)\s+me\s+"
+        r"(?:(?:to|with|over\s+to|through\s+to)\s+)?" + _TARGET,
+        # "take me to human", "put me in touch with your sales team"
+        r"\b(?:take|get|put|bring)\s+me\s+"
+        r"(?:to|through\s+to|in\s+touch\s+with|over\s+to)\s+" + _TARGET,
+        # bare noun phrases
+        r"\b(?:real|live|actual)\s+(?:person|human|agent)\b",
+        r"\bhuman\s+(?:agent|rep|representative|support|being)\b",
+        r"\bnot\s+a\s+robot\b",
+        r"\bfile\s+a\s+complaint\b",
+        r"\bsomeone\s+who\s+(?:handles|can\s+help|deals)\b",
+        r"\bescalate\s+(?:this|it|me)\b",
+    )
+)
+
+
+def _match_human_request(query: str) -> str:
+    """Return the matched phrase if the query explicitly asks for a human."""
+    for pattern in _HUMAN_REQUEST_PATTERNS:
+        found = pattern.search(query)
+        if found:
+            return found.group(0).strip()
+    return ""
+
+
+def _clean_team(team: object) -> str:
+    """Coerce an LLM-supplied team name into a real one.
+
+    The model is asked for a team or null and often returns the *string*
+    "null", which is truthy and would otherwise reach the UI as
+    "Routing to null" and be logged as follow_up_action="null".
+    """
+    if not isinstance(team, str) or team.strip().lower() in _NULLISH:
+        return _DEFAULT_TEAM
+    return team.strip()
+
+
 def check_escalation(
     scenario: str,
     customer_id: str = "",
@@ -110,6 +178,19 @@ def check_escalation(
     for trigger in triggers:
         if trigger.lower() in query_lower:
             matched_triggers.append(trigger)
+
+    # Literal triggers are brittle for human requests, which people phrase
+    # freely. Fall back to shape-based matching so "take me to human" and
+    # "i need to talk to human" are recognised as the evidence they are.
+    if scenario == "escalation_request" and not matched_triggers:
+        phrase = _match_human_request(query_lower)
+        if phrase:
+            return EscalationResult(
+                should_escalate=True,
+                escalation_team=_DEFAULT_TEAM,
+                reason="Query explicitly asks for a human agent.",
+                evidence=f"matched_phrase='{phrase}'",
+            )
 
     # --- Volume-based escalation (data-driven) ---
     volume_triggered = False
@@ -200,7 +281,7 @@ def escalate_with_context(
             {"role": "user", "content": (
                 f"Conversation:\n{conversation_summary[:400]}\n\n"
                 f"Latest message: {query}\n\n"
-                "Does the user EXPLICITLY demand a human? YES or NO?"
+                "Respond with the JSON object only."
             )},
         ],
         temperature=0.0, max_tokens=150,
@@ -212,7 +293,7 @@ def escalate_with_context(
         if data.get("escalate"):
             return EscalationResult(
                 should_escalate=True,
-                escalation_team=data.get("team") or "Sales Ops",
+                escalation_team=_clean_team(data.get("team")),
                 reason=data.get("reason", "LLM determined escalation warranted based on conversation context."),
                 evidence=f"context_aware_llm, query='{query[:100]}'",
             )

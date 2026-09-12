@@ -1,8 +1,15 @@
 """
 Comprehensive multi-turn test — covers ALL 6 tools across varied scenarios.
 
-Usage: python test_all_tools.py
+Usage: python tests/integration/test_all_tools.py
 """
+
+
+import sys as _sys
+from pathlib import Path as _Path
+
+# Runnable from anywhere: put the project root on sys.path before importing app.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
 
 import json
 import time

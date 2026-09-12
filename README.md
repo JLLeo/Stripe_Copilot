@@ -83,9 +83,8 @@ stripe-sales-copilot/
 ├── data/
 │   └── stripe_sales_copilot.db  # SQLite: 5 tables + session_memory + turn_metrics
 ├── milvus.db/                # Milvus Lite (278 chunks, 1536-dim)
-├── test_milvus.py            # Raw Milvus retrieval test
-├── test_retrieve.py          # KG → Milvus pipeline test
-├── tests/                    # Unit tests (198 tests, ~5s, no external deps)
+├── tests/                    # pytest suite — 198 unit + 5 integration-marked
+│   ├── conftest.py           # sys.path bootstrap + excludes integration/
 │   ├── test_escalation.py    # Escalation gating logic
 │   ├── test_kg_retriever.py  # Keyword matching + graph traversal
 │   ├── test_intent.py        # Intent classification
@@ -93,9 +92,15 @@ stripe-sales-copilot/
 │   ├── test_skills.py        # Skill registry integrity
 │   ├── test_context.py       # Context window management
 │   ├── test_tools.py         # Structured tool output
-│   └── test_metrics.py       # Turn metrics collection
-├── test_e2e.py               # End-to-end multi-turn conversations
-├── test_agent.py             # Full Agent demo
+│   ├── test_metrics.py       # Turn metrics collection
+│   └── integration/          # Runnable scripts (NOT collected by pytest)
+│       ├── README.md         # How to run them
+│       ├── test_e2e.py       # End-to-end multi-turn conversations
+│       ├── test_agent.py     # Full pipeline demo → writes result.md
+│       ├── test_all_tools.py # All 6 tools across scenarios
+│       ├── test_multiturn.py # Multi-turn context retention
+│       ├── test_retrieve.py  # KG → Milvus pipeline
+│       └── test_milvus.py    # Raw Milvus retrieval
 ├── ARCHITECTURE.md           # Detailed design document
 ├── requirements.txt
 └── .env
@@ -181,25 +186,36 @@ pytest -m "not integration" --cov=app --cov-report=term-missing
 | `tests/test_tools.py` | 16 (+1 integration) | Structured JSON output, registry consistency |
 | `tests/test_metrics.py` | 16 | Metric collection, token accounting, stage latency |
 
-### Integration tests (calls LLM + Milvus)
+### Integration scripts (calls LLM + Milvus)
+
+These live in `tests/integration/` and are **standalone scripts, not pytest
+modules** — their code runs at import time, so `tests/conftest.py` keeps pytest
+from collecting them. Run them directly; they work from any directory.
 
 ```bash
 # End-to-end multi-turn conversations (4 scenarios, 12 turns)
-python test_e2e.py
+python tests/integration/test_e2e.py
 
 # All-tool coverage test
-python test_all_tools.py
+python tests/integration/test_all_tools.py
 
-# Full Agent pipeline demo with stage-by-stage output
-python test_agent.py
-python test_agent.py "SaaS subscription billing Europe VAT handling"
+# Multi-turn context retention
+python tests/integration/test_multiturn.py
 
-# Raw Milvus retrieval (no KG, no LLM)
-python test_milvus.py
+# Full Agent pipeline demo with stage-by-stage output → writes result.md
+python tests/integration/test_agent.py
+python tests/integration/test_agent.py "SaaS subscription billing Europe VAT handling"
 
-# KG → Milvus pipeline (intent + retrieval)
-python test_retrieve.py
+# KG → Milvus pipeline (retrieval only, no agent loop)
+python tests/integration/test_retrieve.py
+
+# Raw Milvus retrieval (no KG, no agent)
+python tests/integration/test_milvus.py
 ```
+
+The 5 `@pytest.mark.integration` tests inside `tests/test_intent.py` and
+`tests/test_tools.py` are genuine pytest tests and stay in the pytest tree —
+they are separated by marker, not by directory.
 
 ## Key Numbers
 

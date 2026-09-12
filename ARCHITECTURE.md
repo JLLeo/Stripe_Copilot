@@ -686,10 +686,22 @@ two files per call).
 
 ## Testing
 
+Two tiers, split by **how they run**, not just by what they touch:
+
 ```
-pytest -m "not integration"     198 tests, ~5s, no LLM / no Milvus
-pytest                          203 tests (5 integration)
-python test_e2e.py              4 conversations, 12 turns, end-to-end
+tests/*.py                  pytest modules — 198 unit + 5 integration-marked
+tests/integration/*.py      standalone scripts — top-level code, run directly
+```
+
+The scripts execute on import and hit the LLM and Milvus, so collecting them
+would fire real API calls during a plain `pytest`. `tests/conftest.py` excludes
+the directory (`collect_ignore_glob = ["integration/*"]`) and puts the project
+root on `sys.path` so both tiers import `app` regardless of working directory.
+
+```
+pytest -m "not integration"            198 tests, ~5s, no LLM / no Milvus
+pytest                                 203 tests (5 integration-marked)
+python tests/integration/test_e2e.py   4 conversations, 12 turns, end-to-end
 ```
 
 | File | Unit | Integration | Covers |
@@ -739,6 +751,11 @@ app/
 ├── database.py           WAL connection, session_memory, customer/policy reads
 ├── sql_tools.py          Parameterized query functions
 └── static/index.html     SSE chat UI
+
+tests/
+├── conftest.py           sys.path bootstrap + excludes integration/ from pytest
+├── test_*.py             pytest suite (8 modules, 198 unit + 5 marked)
+└── integration/          standalone runnable scripts (see its README)
 ```
 
 ---

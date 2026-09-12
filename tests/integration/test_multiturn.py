@@ -2,8 +2,15 @@
 Multi-turn Agent Test — Varied tool calls + escalation finale.
 
 Usage:
-    python test_multiturn.py
+    python tests/integration/test_multiturn.py
 """
+
+
+import sys as _sys
+from pathlib import Path as _Path
+
+# Runnable from anywhere: put the project root on sys.path before importing app.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
 
 import json
 import time

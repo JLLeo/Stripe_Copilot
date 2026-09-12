@@ -4,8 +4,15 @@ End-to-End Multi-Turn Conversation Test
 Simulates realistic sales conversations across multiple scenarios.
 Validates: intent accuracy, tool usage, context retention, escalation gating.
 
-Usage: python test_e2e.py
+Usage: python tests/integration/test_e2e.py
 """
+
+
+import sys as _sys
+from pathlib import Path as _Path
+
+# Runnable from anywhere: put the project root on sys.path before importing app.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
 
 import json
 import time

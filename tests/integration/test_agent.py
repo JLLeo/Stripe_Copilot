@@ -4,10 +4,17 @@ Full Agent Pipeline Demo — Step-by-Step with Intermediate Results
 Shows EVERY stage: intent -> skill -> ReAct loop (each iteration) -> SYNTH -> escalation.
 
 Usage:
-    python test_agent.py                           # run all 4 demo queries
-    python test_agent.py "your custom query"       # single custom query
-    python test_agent.py > result.md               # save as markdown report
+    python tests/integration/test_agent.py                           # run all 4 demo queries
+    python tests/integration/test_agent.py "your custom query"       # single custom query
+    python tests/integration/test_agent.py > result.md               # save as markdown report
 """
+
+
+import sys as _sys
+from pathlib import Path as _Path
+
+# Runnable from anywhere: put the project root on sys.path before importing app.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
 
 import json
 import sys
@@ -451,12 +458,12 @@ total_elapsed = (time.time() - TOTAL_START) * 1000
 sep()
 out(f"## ALL {len(DEMO_QUERIES)} TESTS COMPLETE")
 out(f"  Total time: {total_elapsed:.0f}ms  |  Avg: {total_elapsed/len(DEMO_QUERIES):.0f}ms")
-out(f"  Output format: Markdown — pipe to file with:  python test_agent.py > result.md")
+out(f"  Output format: Markdown — pipe to file with:  python tests/integration/test_agent.py > result.md")
 
 # ===========================================================================
 # Write result.md automatically
 # ===========================================================================
-result_path = "result.md"
+result_path = str(_Path(__file__).resolve().parent.parent.parent / "result.md")
 with open(result_path, "w", encoding="utf-8") as f:
     f.write("\n".join(_output_lines))
 print(f"\n[OK] Result written to {result_path}")

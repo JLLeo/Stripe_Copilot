@@ -2,11 +2,18 @@
 End-to-end test: KG expansion -> Milvus search -> Agent response.
 
 Run:
-    python test_retrieve.py
+    python tests/integration/test_retrieve.py
 
 Or test a custom query:
-    python test_retrieve.py "your question here"
+    python tests/integration/test_retrieve.py "your question here"
 """
+
+
+import sys as _sys
+from pathlib import Path as _Path
+
+# Runnable from anywhere: put the project root on sys.path before importing app.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
 
 import sys
 import time
