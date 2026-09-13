@@ -1,5 +1,5 @@
-# Stripe Sales Copilot -- Core Dependencies
-# =========================================
+# Stripe AI Sales Agent -- Core Dependencies
+# ==========================================
 
 # Web framework
 fastapi>=0.135.0
@@ -8,21 +8,17 @@ starlette>=1.0.0
 
 # Data validation
 pydantic>=2.12.0
-pydantic-settings>=2.13.0
 
 # Environment
 python-dotenv>=1.2.0
 
-# LLM & Agent
+# Models (DeepSeek chat + OpenAI embeddings, both via the openai client)
 openai>=2.30.0
-tiktoken>=0.12.0
 
-# LangChain ecosystem
-langchain>=1.2.0
+# Retained by the not-yet-rewired Milvus ingestion/retrieval modules (removed with the knowledge-search ticket)
 langchain-core>=1.2.0
 langchain-openai>=1.1.0
 langchain-text-splitters>=0.3.0
-langchain-community>=0.3.0
 
 # Vector database
 pymilvus>=3.0.0

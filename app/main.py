@@ -1,44 +1,52 @@
+"""
+FastAPI transport for the Stripe AI Sales Agent.
+
+The app owns one `Harness` (built at startup from the environment unless a
+test installed its own on `app.state.harness` first) and exposes it over a
+synchronous chat endpoint and an SSE stream. Everything about a turn lives in
+the harness; this module only moves bytes.
+"""
+
+from __future__ import annotations
+
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 
-from app import tool_cache
-from app.agent import run_sales_agent
 from app.database import get_connection, init_db
-from app.graph import stream_agent
-from app.metrics import init_metrics, intent_breakdown, summary, tool_usage
-from app.schemas import SalesAgentRequest, SalesAgentResponse
+from app.harness.core import Harness, SessionCustomerMismatch, TurnEvent, UnknownCustomer
+from app.harness.deepseek import DeepSeekProvider
+from app.metrics import init_metrics, summary
+from app.schemas import ChatRequest, ChatResponse
 
-# ---------------------------------------------------------------------------
-# Static files directory
-# ---------------------------------------------------------------------------
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-STATIC_DIR.mkdir(exist_ok=True)
 
 
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     init_metrics()
+    if getattr(app.state, "harness", None) is None:
+        load_dotenv()  # DEEPSEEK_API_KEY / OPENAI_API_KEY for the production provider
+        app.state.harness = Harness.build(provider=DeepSeekProvider.from_env())
     yield
 
 
 app = FastAPI(
-    title="Stripe Sales Copilot",
-    description="AI-powered sales enablement agent with KG-enhanced RAG retrieval.",
-    version="0.2.0",
+    title="Stripe AI Sales Agent",
+    description="A customer-facing AI sales agent on a hand-built, Claude Code-style harness.",
+    version="0.3.0",
     lifespan=lifespan,
 )
+app.state.harness = None
 
-# Mount static files (CSS/JS if needed later)
-if (STATIC_DIR).exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+def _harness(request: Request) -> Harness:
+    return request.app.state.harness
 
 
 # ---------------------------------------------------------------------------
@@ -46,94 +54,73 @@ if (STATIC_DIR).exists():
 # ---------------------------------------------------------------------------
 @app.get("/")
 def chat_ui():
-    """Serve the single-page chat interface."""
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path), media_type="text/html")
-    return {"message": "Stripe Sales Copilot API", "docs_url": "/docs"}
+    return {"message": "Stripe AI Sales Agent API", "docs_url": "/docs"}
 
 
 # ---------------------------------------------------------------------------
-# API: Customer list
+# API: customers (sign-in-as selector)
 # ---------------------------------------------------------------------------
 @app.get("/api/customers")
 def list_customers():
-    """Return all customers for the UI dropdown."""
-    conn = get_connection()
-    rows = conn.execute(
+    rows = get_connection().execute(
         "SELECT customer_id, customer_name, industry, annual_payment_volume "
         "FROM customers ORDER BY customer_name"
     ).fetchall()
-    return [
-        {
-            "customer_id": r["customer_id"],
-            "customer_name": r["customer_name"],
-            "industry": r["industry"],
-            "annual_payment_volume": r["annual_payment_volume"],
-        }
-        for r in rows
-    ]
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
-# API: Chat (sync — existing)
+# API: chat
 # ---------------------------------------------------------------------------
-@app.post("/sales-agent/chat", response_model=SalesAgentResponse)
-def chat(request: SalesAgentRequest):
-    result = run_sales_agent(request)
-    return result
+@app.post("/sales-agent/chat", response_model=ChatResponse)
+def chat(body: ChatRequest, request: Request):
+    """Run one turn and return the finished reply."""
+    final: TurnEvent | None = None
+    for event in _run(request, body):
+        if event.name in ("done", "error"):
+            final = event
+    if final is None:
+        raise HTTPException(status_code=500, detail="the turn produced no result")
+    return ChatResponse(**final.data)
 
 
-# ---------------------------------------------------------------------------
-# API: Chat (streaming — SSE)
-# ---------------------------------------------------------------------------
+def _run(request: Request, body: ChatRequest):
+    """Start a turn, translating session-binding refusals into HTTP errors before streaming."""
+    events = _harness(request).run_turn(body.session_id, body.customer_id, body.message)
+    try:
+        first = next(events)
+    except UnknownCustomer as exc:
+        raise HTTPException(status_code=404, detail=f"unknown customer {exc}") from exc
+    except SessionCustomerMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except StopIteration:
+        return
+    yield first
+    yield from events
+
+
+def _sse(event: TurnEvent) -> str:
+    return f"event: {event.name}\ndata: {json.dumps(event.data, ensure_ascii=False)}\n\n"
+
+
 @app.post("/sales-agent/stream")
-async def chat_stream(request: SalesAgentRequest):
-    """Stream agent pipeline stages as Server-Sent Events."""
-    generator = stream_agent(
-        query=request.message,
-        sales_rep_id=request.sales_rep_id,
-        customer_id=request.customer_id or "",
-        session_id=request.session_id,
-    )
+def chat_stream(body: ChatRequest, request: Request):
+    """Run one turn as Server-Sent Events: text_delta* then done (or error)."""
+    events = _run(request, body)
     return StreamingResponse(
-        generator,
+        (_sse(event) for event in events),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
 
 
 # ---------------------------------------------------------------------------
-# API: Confirm escalation (mock human handoff)
-# ---------------------------------------------------------------------------
-@app.post("/sales-agent/confirm-escalation")
-def confirm_escalation(request: SalesAgentRequest):
-    """Mock: confirm escalation and return a 'connected to human' message."""
-    return {
-        "message": (
-            f"You are now connected to a {request.message} representative. "
-            "They have received the conversation summary and will take over from here. "
-            "Thank you for using Stripe Sales Copilot."
-        ),
-        "status": "escalated",
-        "session_id": request.session_id,
-    }
-
-
-# ---------------------------------------------------------------------------
-# API: Observability
+# API: observability
 # ---------------------------------------------------------------------------
 @app.get("/api/metrics")
 def get_metrics(days: int = 7):
-    """Aggregate agent metrics: latency, tokens, cache efficiency, error rate."""
-    return {
-        "window_days": days,
-        "summary": summary(days),
-        "by_intent": intent_breakdown(days),
-        "tool_usage": tool_usage(days),
-        "tool_cache": tool_cache.stats(),
-    }
+    """Turn volume, latency, tokens per turn, and prompt-cache hit rate."""
+    return {"window_days": days, "summary": summary(days)}

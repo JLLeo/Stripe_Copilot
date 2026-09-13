@@ -12,7 +12,7 @@ import sqlite3
 import pytest
 
 from app import database
-from app.metrics import TurnMetrics, init_metrics
+from app.metrics import TurnRecord, init_metrics, record_turn
 
 pytestmark = pytest.mark.unit
 
@@ -94,12 +94,13 @@ def test_runtime_writes_leave_the_seed_file_untouched(runtime_db):
     conn = database.get_connection()
     customer_id = conn.execute("SELECT customer_id FROM customers LIMIT 1").fetchone()[0]
 
-    database.save_session("s1", [{"role": "user", "content": "hi"}], "", customer_id)
-    database.log_interaction("i1", customer_id, "rep", "chat", "q", "intent", "", "", "")
-    TurnMetrics(session_id="s1", customer_id=customer_id).save()
+    database.create_session("s1", customer_id, "Customer: test")
+    database.append_messages("s1", [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}])
+    record_turn(TurnRecord(turn_id="t1", session_id="s1", customer_id=customer_id, model="m"))
 
     assert _sha256(database.seed_db_path()) == before
-    assert database.load_session("s1")["turns"][0]["content"] == "hi"
+    assert database.load_session("s1")["customer_id"] == customer_id
+    assert [m["content"] for m in database.load_messages("s1")] == ["hi", "hello"]
 
 
 def test_seed_tables_cannot_be_written(runtime_db):
@@ -120,3 +121,20 @@ def test_missing_seed_database_gives_an_actionable_error(tmp_path, monkeypatch):
             database.get_connection()
     finally:
         database.close_connection()
+
+
+def test_messages_round_trip_every_wire_field(runtime_db):
+    database.init_db()
+    database.create_session("s1", None, "Customer: unknown")
+    database.append_messages("s1", [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": None, "reasoning_content": "hmm",
+         "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+        {"role": "tool", "content": "{}", "tool_call_id": "c1", "name": "f"},
+    ])
+    assert database.load_messages("s1") == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": None, "reasoning_content": "hmm",
+         "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+        {"role": "tool", "content": "{}", "tool_call_id": "c1", "name": "f"},
+    ]

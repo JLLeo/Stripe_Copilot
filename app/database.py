@@ -6,8 +6,8 @@ Seed database   (tracked, read-only)   data/seed.db
     Rebuild from data.xlsx with:  python scripts/build_seed_db.py
 
 Runtime database (ignored, read-write)  data/runtime.db
-    session_memory, sales_interactions, turn_metrics — everything the agent
-    writes. Created on first start.
+    sessions, messages, turn_metrics — everything the agent writes.
+    Created on first start.
 
 Callers never learn which table lives where: the runtime database is the main
 database and the seed is ATTACHed read-only, so unqualified table names resolve
@@ -41,8 +41,8 @@ SEED_TABLES: tuple[str, ...] = (
     "sales_policy_updates",
 )
 RUNTIME_TABLES: tuple[str, ...] = (
-    "session_memory",
-    "sales_interactions",
+    "sessions",
+    "messages",
     "turn_metrics",  # DDL lives in app.metrics.init_metrics; ownership is recorded here.
 )
 
@@ -102,77 +102,108 @@ def close_connection() -> None:
 def init_db() -> None:
     """Create runtime tables if they don't exist. Call at app startup."""
     conn = get_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS session_memory (
-            session_id   TEXT PRIMARY KEY,
-            customer_id  TEXT,
-            turns_json   TEXT DEFAULT '[]',
-            summary      TEXT DEFAULT '',
-            updated_at   TEXT
-        )
-    """)
     # No FK to customers: SQLite cannot reference a table in an attached database.
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS sales_interactions (
-            interaction_id        TEXT PRIMARY KEY,
-            customer_id           TEXT NOT NULL,
-            sales_rep_id          TEXT,
-            interaction_date      TEXT,
-            channel               TEXT,
-            customer_question     TEXT,
-            detected_intent       TEXT,
-            mentioned_products    TEXT,
-            customer_pain_points  TEXT,
-            follow_up_action      TEXT,
-            next_step_date        TEXT,
-            created_at            TEXT
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id      TEXT PRIMARY KEY,
+            customer_id     TEXT,
+            customer_block  TEXT NOT NULL,
+            created_at      TEXT NOT NULL
         )
     """)
+    # Working memory: one row per message, only ever inserted (ADR 0005).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id         TEXT NOT NULL REFERENCES sessions(session_id),
+            role               TEXT NOT NULL,
+            content            TEXT,
+            reasoning_content  TEXT,
+            tool_calls_json    TEXT,
+            tool_call_id       TEXT,
+            name               TEXT,
+            created_at         TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)")
     conn.commit()
 
 
 # ---------------------------------------------------------------------------
-# Session memory operations
+# Sessions and working memory
 # ---------------------------------------------------------------------------
-def load_session(session_id: str) -> dict[str, Any]:
-    """Load session state: {turns, summary, customer_id} or empty defaults."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT turns_json, summary, customer_id FROM session_memory WHERE session_id = ?",
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_session(session_id: str) -> dict[str, Any] | None:
+    """Session binding and its SessionStart customer block, or None if unseen."""
+    row = get_connection().execute(
+        "SELECT session_id, customer_id, customer_block, created_at FROM sessions WHERE session_id = ?",
         (session_id,),
     ).fetchone()
-
-    if row is None:
-        return {"turns": [], "summary": "", "customer_id": None}
-
-    return {
-        "turns": json.loads(row["turns_json"]),
-        "summary": row["summary"] or "",
-        "customer_id": row["customer_id"],
-    }
+    return dict(row) if row else None
 
 
-def save_session(
-    session_id: str,
-    turns: list[dict],
-    summary: str = "",
-    customer_id: str | None = None,
-) -> None:
-    """Upsert session state to SQLite."""
+def create_session(session_id: str, customer_id: str | None, customer_block: str) -> dict[str, Any]:
+    """Bind a new session to a customer (or none, for a prospect) and freeze its customer block."""
     conn = get_connection()
-    now = datetime.now(timezone.utc).isoformat()
-    cid = customer_id if customer_id else None  # empty string -> NULL
     conn.execute(
+        # OR IGNORE: two first turns racing on a new session both land on the same row.
+        "INSERT OR IGNORE INTO sessions (session_id, customer_id, customer_block, created_at) VALUES (?, ?, ?, ?)",
+        (session_id, customer_id or None, customer_block, _now()),
+    )
+    conn.commit()
+    return load_session(session_id)  # type: ignore[return-value]
+
+
+def load_messages(session_id: str) -> list[dict[str, Any]]:
+    """Working memory in wire shape, oldest first."""
+    rows = get_connection().execute(
         """
-        INSERT INTO session_memory (session_id, customer_id, turns_json, summary, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET
-            customer_id = excluded.customer_id,
-            turns_json = excluded.turns_json,
-            summary = excluded.summary,
-            updated_at = excluded.updated_at
+        SELECT role, content, reasoning_content, tool_calls_json, tool_call_id, name
+        FROM messages WHERE session_id = ? ORDER BY id
         """,
-        (session_id, cid, json.dumps(turns, ensure_ascii=False), summary, now),
+        (session_id,),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        msg: dict[str, Any] = {"role": r["role"], "content": r["content"]}
+        if r["reasoning_content"] is not None:
+            msg["reasoning_content"] = r["reasoning_content"]
+        if r["tool_calls_json"]:
+            msg["tool_calls"] = json.loads(r["tool_calls_json"])
+        if r["tool_call_id"]:
+            msg["tool_call_id"] = r["tool_call_id"]
+        if r["name"]:
+            msg["name"] = r["name"]
+        out.append(msg)
+    return out
+
+
+def append_messages(session_id: str, messages: list[dict[str, Any]]) -> None:
+    """Append wire-shaped messages to a session. Never updates or deletes."""
+    conn = get_connection()
+    now = _now()
+    conn.executemany(
+        """
+        INSERT INTO messages
+            (session_id, role, content, reasoning_content, tool_calls_json, tool_call_id, name, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                session_id,
+                m["role"],
+                m.get("content"),
+                m.get("reasoning_content"),
+                json.dumps(m["tool_calls"], ensure_ascii=False) if m.get("tool_calls") else None,
+                m.get("tool_call_id"),
+                m.get("name"),
+                now,
+            )
+            for m in messages
+        ],
     )
     conn.commit()
 
@@ -204,55 +235,13 @@ def get_customer_product_usage(customer_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def get_active_policies(product_area: str | None = None) -> list[dict[str, Any]]:
-    """Return active sales policies, optionally filtered by area (case-insensitive)."""
-    conn = get_connection()
-    if product_area:
-        rows = conn.execute(
-            """
-            SELECT * FROM sales_policy_updates
-            WHERE is_active = 1 AND LOWER(policy_area) = LOWER(?)
-            ORDER BY effective_start_date DESC
-            """,
-            (product_area,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT * FROM sales_policy_updates
-            WHERE is_active = 1
-            ORDER BY policy_area, effective_start_date DESC
-            """
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def log_interaction(
-    interaction_id: str,
-    customer_id: str,
-    sales_rep_id: str,
-    channel: str,
-    customer_question: str,
-    detected_intent: str,
-    mentioned_products: str,
-    customer_pain_points: str,
-    follow_up_action: str,
-) -> None:
-    """Write an interaction record to sales_interactions table."""
-    conn = get_connection()
-    now = datetime.now(timezone.utc).isoformat()
-    conn.execute(
+def get_active_policies() -> list[dict[str, Any]]:
+    """Return the active rows of the policy register."""
+    rows = get_connection().execute(
         """
-        INSERT INTO sales_interactions
-            (interaction_id, customer_id, sales_rep_id, interaction_date, channel,
-             customer_question, detected_intent, mentioned_products,
-             customer_pain_points, follow_up_action, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            interaction_id, customer_id, sales_rep_id, now, channel,
-            customer_question, detected_intent, mentioned_products,
-            customer_pain_points, follow_up_action, now,
-        ),
-    )
-    conn.commit()
+        SELECT * FROM sales_policy_updates
+        WHERE is_active = 1
+        ORDER BY policy_area, effective_start_date DESC
+        """
+    ).fetchall()
+    return [dict(r) for r in rows]

@@ -1,20 +1,20 @@
-from pydantic import BaseModel
-from typing import Optional, List
+"""Request and response shapes for the chat endpoints."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
 
 
-class SalesAgentRequest(BaseModel):
-    sales_rep_id: str
-    customer_id: Optional[str] = None
+class ChatRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    customer_id: str | None = None  # None: a prospect with no Stripe account
+    message: str = Field(min_length=1)
+
+
+class ChatResponse(BaseModel):
     session_id: str
-    message: str
-
-
-class SalesAgentResponse(BaseModel):
-    intent: str
-    recommended_stripe_products: List[str]
-    internal_answer: str
-    client_ready_response: str
-    sources: List[str]
-    need_escalation: bool
-    escalation_team: Optional[str] = None
-    confidence: float
+    turn_id: str
+    reply: str
+    usage: dict[str, int] | None = None
+    latency_ms: int | None = None
+    error: str | None = None
