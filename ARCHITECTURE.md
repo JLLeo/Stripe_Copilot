@@ -39,8 +39,9 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
 ### The turn — `core.py`
 
 `Harness.run_turn(session_id, customer_id, message)` is a generator of `TurnEvent`s
-(`thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`, `text_delta`,
-`done`, `error`). The transport layer forwards them as Server-Sent Events or, for the
+(`thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`,
+`subagent_started`, `subagent_tool_call`, `subagent_finished`, `text_delta`, `done`,
+`error`). The transport layer forwards them as Server-Sent Events or, for the
 synchronous endpoint, keeps only the last one.
 
 1. **Session binding.** An unseen `session_id` triggers **SessionStart**: the Customer
@@ -76,9 +77,10 @@ class, and appends nothing, so the next message starts from unchanged working me
 If the customer disconnects mid-reply the turn is still metered (error
 `ClientDisconnected`) and, again, nothing is appended.
 
-`HarnessConfig` (main model `deepseek-v4-pro`, `max_tokens`, `thinking`, `skills_dir`,
-`tool_round_budget`, `result_cap_chars`, `tool_cache_ttl_seconds`) is read from
-`HARNESS_*` environment variables. Session binding is strict: an unknown
+`HarnessConfig` (main model `deepseek-v4-pro`, sub-agent model `deepseek-flash`,
+`max_tokens`, `thinking`, `skills_dir`, `tool_round_budget`, `subagent_max_rounds`,
+`result_cap_chars`, `tool_cache_ttl_seconds`, `milvus_uri`) is read from `HARNESS_*`
+environment variables. Session binding is strict: an unknown
 `customer_id` is refused (HTTP 404) rather than downgraded to a prospect, and a session
 never switches customer (HTTP 409).
 
@@ -128,7 +130,39 @@ Results are compact JSON — they live in every later request of the session.
 | `get_my_profile()` | seed `customers` + `customer_product_usage` | no parameters; reads the session's bound customer, so another customer cannot be named |
 | `list_products(group?)` | seed `stripe_products` | name, group, one-line description |
 | `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing |
-| `search_knowledge(question, products[], topics[])` | the knowledge index (below) | `products` and `topics` are enums from the graph; results carry passages and sources; `meta.sources` feeds `source_extraction` |
+| `search_knowledge(question, products[], topics[])` | the knowledge index (below) | `products` and `topics` are enums from the graph; results carry passages and sources; `meta.sources` feeds `source_extraction`. Its description says: use this first; hand multi-product, comparative or thin results to `research` |
+| `research(question)` | a Sub-agent (below) over `search_knowledge` | returns `{brief, sources, tool_calls, stopped_by_cap, gave_up}`; the documents the brief cites in `[Title]` form are its sources (a brief that cites nothing keeps everything it read); `meta.subagent` carries its metering |
+
+### Sub-agents — `subagent.py`, `app/tools/research.py`
+
+A Sub-agent is a tool whose implementation is a small agent of its own: `run_subagent()`
+takes a `SubagentSpec` (name, model, system prompt, a `ToolRegistry` holding only the
+tools it may call, a round cap, and the wording to use when the budget runs out) and a
+task, and runs the same request → tool → request loop as the harness in a fresh message
+list — system prompt and task only. Nothing from the main conversation goes in (no static
+prompt, no customer block, no working memory) and nothing but the Brief comes out, so
+however much the sub-agent reads, the main context grows by one tool result
+([ADR 0006](docs/adr/0006-context-pressure-relieved-in-tiers.md)). A round is one model
+response with tool calls, so parallel calls in one response count once. After
+`max_rounds` rounds the next request carries `tool_choice="none"` and the spec's
+cap note; a model that still asks for tools gets the spec's fallback brief and the
+result is marked `gave_up`. Results it reads are capped like the harness's, and the
+sources they carry are collected.
+
+`research` is the first sub-agent: `deepseek-flash`, `search_knowledge` as its only tool,
+3 rounds, a system prompt that asks for a ≤200-word brief with `[Source Title]` after
+every factual statement and a closing line on what could not be confirmed.
+
+**Progress reaches the customer as it happens.** A tool reports progress through
+`ToolContext.emit`. The harness runs each tool on a worker thread and yields the events
+it emits while it runs, so the stream carries `tool_call(research)` before the sub-agent
+has made a single request, then `subagent_started`, one `subagent_tool_call` per search
+as each happens, `subagent_finished`, and finally the `tool_result`. The sub-agent's
+model calls and tokens are metered apart from the main model's (`subagent_calls` counts
+delegations; `subagent_prompt_tokens` / `subagent_completion_tokens` their cost), so
+`done.usage` remains the cost of the conversation the customer is in; a brief served from
+the tool cache is not booked as a new delegation. The same runner will serve Reflection
+(#10).
 
 ### Hooks and guardrails — `hooks.py`, `guardrails.py`
 
@@ -295,15 +329,15 @@ provider (OpenAI embeddings); the directory is tracked so a clean checkout runs.
 older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the schema), so a
 `runtime.db` from an earlier version keeps working. `summary(days)` returns turn count, error count,
 average latency, average prompt / completion / reasoning tokens, total cache hit and
-miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits and
-provider calls per turn; `tool_usage(days)` counts calls per tool. Each row also keeps
-the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
+miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits,
+provider calls per turn, and sub-agent delegations and tokens; `tool_usage(days)` counts
+calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
 first-class number because the prefix discipline in ADR 0005 is easy to break by
 accident and this is where a break shows first.
 
 ## Testing
 
-70 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~12 s. The app under test
+83 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~13 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -319,7 +353,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 | Ticket | Adds |
 |---|---|
 | #5 | `ask_customer`, `Stop` guardrails (`anti_placeholder`, `internal_canary`) |
-| #7 | the `research` sub-agent |
 | #8 | Handoff with customer confirmation, the seven Teams, policy skills |
 | #9 | prospect discovery and lead capture |
 | #10 | Customer Memory and Reflection |

@@ -8,7 +8,6 @@ with no network. The internal document in the fixture must never surface.
 """
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -19,116 +18,17 @@ from app.harness.scripted import ScriptedProvider
 from app.retrieval import chunking, linking
 from app.retrieval.graph import KnowledgeGraph
 from app.retrieval.index import KnowledgeIndex, build_index
+from tests.conftest import FIXTURE_EMBEDDING_DIM
 from tests.conftest import chat as _chat
 from tests.conftest import sse_events as _events
+from tests.fixture_kb import DOCS, INTERNAL_MARKER
 
 pytestmark = pytest.mark.unit
-
-INTERNAL_MARKER = "DISCOUNT-LADDER-SECRET"
-
-DOCS = {
-    "payment/checkout.md": """# Stripe Checkout
-
-Product Line: Payment
-Product: Checkout
-Topic: Hosted payment page
-Source Type: public_doc
-Access Level: public
-Source URL: https://stripe.com/payments/checkout
-
-## Summary
-
-Stripe Checkout is a prebuilt, Stripe-hosted payment page that accepts cards, wallets and local payment methods.
-
-## Key Capabilities
-
-- Hosted page with Apple Pay and Google Pay wallets
-- Adaptive Pricing shows the customer's local currency
-- Supports subscriptions and one-time payments
-
-## Price
-
-Checkout is included with standard processing at 2.9% + $0.30.
-""",
-    "payment/radar.md": """# Stripe Radar
-
-Product Line: Payment
-Product: Radar
-Topic: Fraud prevention
-Source Type: public_doc
-Access Level: public
-Source URL: https://stripe.com/radar
-
-## Summary
-
-Stripe Radar scores every payment for fraud risk with machine learning trained on the Stripe network.
-
-## Key Capabilities
-
-- Real-time fraud risk scoring on every transaction
-- Rules to block, allow or review payments
-- Radar for Fraud Teams adds manual review queues
-""",
-    "revenue/billing_overview.md": """# Stripe Billing Overview
-
-Product Line: Revenue
-Product: Billing
-Topic: Recurring billing
-Source Type: public_doc
-Access Level: public
-Source URL: https://stripe.com/billing
-
-## Summary
-
-Stripe Billing automates subscriptions, invoices and usage-based recurring revenue.
-
-## Key Capabilities
-
-- Smart Retries recover failed subscription payments
-- Customer portal for plan changes
-""",
-    "pricing/custom_pricing_policy.md": f"""# Mock Internal: Custom Pricing Policy
-
-Product Line: Pricing
-Product: Pricing
-Topic: Internal Custom Pricing Guidelines
-Source Type: mock_policy
-Access Level: internal_mock
-Source URL: internal://pricing-policy
-
-## Summary
-
-INTERNAL ONLY. Discount ladder {INTERNAL_MARKER}: offer 10% at $1M, 20% at $5M.
-""",
-}
-
-
-@pytest.fixture(scope="module")
-def knowledge_base(tmp_path_factory) -> Path:
-    root = tmp_path_factory.mktemp("kb")
-    for rel, text in DOCS.items():
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-    return root
-
-
-@pytest.fixture(scope="module")
-def index_uri(tmp_path_factory, knowledge_base) -> str:
-    uri = str(tmp_path_factory.mktemp("milvus") / "knowledge.db")
-    report = build_index(
-        provider=ScriptedProvider(embedding_dim=64),
-        knowledge_base=knowledge_base,
-        milvus_uri=uri,
-        rebuild=True,
-    )
-    assert report["documents"] == 3 and report["chunks"] >= 6
-    return uri
 
 
 @pytest.fixture
 def index(index_uri) -> KnowledgeIndex:
-    idx = KnowledgeIndex(provider=ScriptedProvider(embedding_dim=64), milvus_uri=index_uri)
+    idx = KnowledgeIndex(provider=ScriptedProvider(embedding_dim=FIXTURE_EMBEDDING_DIM), milvus_uri=index_uri)
     yield idx
     idx.close()
 
@@ -178,7 +78,7 @@ def test_tables_are_never_split_from_their_header_row():
 
 
 def test_ingestion_embeds_through_the_provider(knowledge_base, tmp_path):
-    provider = ScriptedProvider(embedding_dim=64)
+    provider = ScriptedProvider(embedding_dim=FIXTURE_EMBEDDING_DIM)
     build_index(provider=provider, knowledge_base=knowledge_base, milvus_uri=str(tmp_path / "k.db"), rebuild=True)
     assert provider.embed_requests, "every chunk vector came from Provider.embed"
     assert INTERNAL_MARKER not in json.dumps(provider.embed_requests), "internal text never even reaches the embedder"
@@ -265,7 +165,7 @@ def test_search_without_entities_searches_all_public_knowledge(index):
 # =========================================================================
 @pytest.fixture
 def provider() -> ScriptedProvider:
-    return ScriptedProvider(embedding_dim=64)  # must match the fixture index
+    return ScriptedProvider(embedding_dim=FIXTURE_EMBEDDING_DIM)  # must match the fixture index
 
 
 @pytest.fixture
@@ -327,6 +227,6 @@ def test_a_search_served_from_the_tool_cache_still_yields_its_sources(client, pr
     r2 = _chat(client, "s1", "again")
     assert r1.json()["sources"] and r2.json()["sources"] == r1.json()["sources"]
     row = database.get_connection().execute(
-        "SELECT cache_hits FROM turn_metrics WHERE session_id='s1' ORDER BY created_at DESC LIMIT 1"
+        "SELECT cache_hits FROM turn_metrics WHERE session_id='s1' ORDER BY rowid DESC LIMIT 1"
     ).fetchone()
     assert row[0] == 1, "the second search was a cache hit, and it still cited its sources"

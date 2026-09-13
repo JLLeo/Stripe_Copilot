@@ -66,9 +66,11 @@ def register(registry: ToolRegistry, index: KnowledgeIndex) -> None:
     registry.register(Tool(
         name="search_knowledge",
         description=(
-            "Search Stripe's public product documentation. Name the products and topics the question is about "
-            "so the knowledge graph can widen the search to related products; leave them empty only if the "
-            "question names nothing specific. Returns the best passages with their sources — cite them."
+            "Search Stripe's public product documentation for one specific question. Name the products and "
+            "topics it is about so the knowledge graph can widen the search to related products; leave them "
+            "empty only if the question names nothing specific. Returns the best passages with their sources — "
+            "cite them. Use this first; if the question spans several products, asks for a comparison, or the "
+            "passages come back thin, hand it to research instead of searching again and again."
         ),
         parameters={
             "type": "object",

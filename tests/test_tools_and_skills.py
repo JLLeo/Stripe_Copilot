@@ -43,7 +43,7 @@ def _tool_messages(request) -> list[dict]:
 
 def _metrics_row(session_id: str) -> dict:
     row = database.get_connection().execute(
-        "SELECT * FROM turn_metrics WHERE session_id = ? ORDER BY created_at DESC LIMIT 1", (session_id,)
+        "SELECT * FROM turn_metrics WHERE session_id = ? ORDER BY rowid DESC LIMIT 1", (session_id,)
     ).fetchone()
     return dict(row)
 
@@ -114,7 +114,7 @@ def test_skills_carry_no_tool_allowlist_and_definitions_are_stable(client, provi
     a, b = provider.requests
     assert json.dumps(a.tools, sort_keys=True) == json.dumps(b.tools, sort_keys=True)
     names = [t["function"]["name"] for t in a.tools]
-    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge"]
+    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research"]
     skill_tool = a.tools[0]["function"]
     assert sorted(skill_tool["parameters"]["properties"]["name"]["enum"]) == sorted(PRODUCT_SKILLS)
     assert "allowed" not in json.dumps(a.tools)
@@ -284,7 +284,7 @@ def test_identical_tool_call_is_served_from_the_session_cache(client, provider):
 
     assert _metrics_row("s1")["cache_hits"] == 1  # second turn: one lookup, one hit
     first_turn = database.get_connection().execute(
-        "SELECT cache_hits FROM turn_metrics WHERE session_id='s1' ORDER BY created_at LIMIT 1"
+        "SELECT cache_hits FROM turn_metrics WHERE session_id='s1' ORDER BY rowid LIMIT 1"
     ).fetchone()[0]
     assert first_turn == 1  # first turn: two identical calls, the second was a hit
 

@@ -101,3 +101,38 @@ def chat(client, session_id: str, message: str, customer_id: str | None = None):
     if customer_id:
         body["customer_id"] = customer_id
     return client.post("/sales-agent/chat", json=body)
+
+
+# ---------------------------------------------------------------------------
+# A fixture knowledge base indexed once per session through the fake embedder
+# ---------------------------------------------------------------------------
+FIXTURE_EMBEDDING_DIM = 64
+
+
+@pytest.fixture(scope="session")
+def knowledge_base(tmp_path_factory) -> Path:
+    from tests.fixture_kb import DOCS
+
+    root = tmp_path_factory.mktemp("kb")
+    for rel, text in DOCS.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+@pytest.fixture(scope="session")
+def index_uri(tmp_path_factory, knowledge_base) -> str:
+    """A real Milvus Lite index of the fixture knowledge base (dense + BM25), built once."""
+    from app.harness.scripted import ScriptedProvider
+    from app.retrieval.index import build_index
+
+    uri = str(tmp_path_factory.mktemp("milvus") / "knowledge.db")
+    report = build_index(
+        provider=ScriptedProvider(embedding_dim=FIXTURE_EMBEDDING_DIM),
+        knowledge_base=knowledge_base,
+        milvus_uri=uri,
+        rebuild=True,
+    )
+    assert report["documents"] == 3 and report["chunks"] >= 6
+    return uri

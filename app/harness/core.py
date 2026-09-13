@@ -12,11 +12,13 @@ books (ADR 0001).
 from __future__ import annotations
 
 import os
+import queue
+import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Generator, Iterator
 
 from app import database
 from app.harness import guardrails, prompt
@@ -40,6 +42,7 @@ from app.harness.provider import (
     Usage,
 )
 from app.harness.skills import Skill, load_skills, register_skill_tool, skills_index
+from app.harness.subagent import SubagentMetering
 from app.harness.tools import ToolContext, ToolRegistry, ToolResult
 from app.metrics import TurnRecord, record_turn
 from app.paths import SKILLS_DIR
@@ -74,6 +77,8 @@ class HarnessConfig:
     result_cap_chars: int = 6000  # ≈1.5K tokens; larger tool results are truncated
     tool_cache_ttl_seconds: float = 900.0
     milvus_uri: str = DEFAULT_MILVUS_URI
+    sub_model: str = "deepseek-flash"  # sub-agents (research, later reflection)
+    subagent_max_rounds: int = 3
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -86,6 +91,8 @@ class HarnessConfig:
             result_cap_chars=int(os.environ.get("HARNESS_RESULT_CAP_CHARS", cls.result_cap_chars)),
             tool_cache_ttl_seconds=float(os.environ.get("HARNESS_TOOL_CACHE_TTL_SECONDS", cls.tool_cache_ttl_seconds)),
             milvus_uri=os.environ.get("MILVUS_URI", cls.milvus_uri),
+            sub_model=os.environ.get("HARNESS_SUB_MODEL", cls.sub_model),
+            subagent_max_rounds=int(os.environ.get("HARNESS_SUBAGENT_MAX_ROUNDS", cls.subagent_max_rounds)),
         )
 
 
@@ -93,7 +100,7 @@ class HarnessConfig:
 class TurnEvent:
     """What the transport layer forwards to the customer's client."""
 
-    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | done | error
+    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | done | error
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -108,9 +115,14 @@ class _Books:
     skills_loaded: list[str] = field(default_factory=list)
     hook_outcomes: dict[str, int] = field(default_factory=dict)
     cache_hits: int = 0
+    subagent_calls: int = 0
+    subagent_prompt_tokens: int = 0
+    subagent_completion_tokens: int = 0
 
-    def add_usage(self, usage: Usage) -> None:
-        self.usage = Usage(**{f.name: getattr(self.usage, f.name) + getattr(usage, f.name) for f in fields(Usage)})
+    def add_subagent(self, metering: SubagentMetering) -> None:
+        self.subagent_calls += 1  # one delegation, however many rounds it took
+        self.subagent_prompt_tokens += metering.usage.prompt_tokens
+        self.subagent_completion_tokens += metering.usage.completion_tokens
 
     def outcome(self, name: str) -> None:
         self.hook_outcomes[name] = self.hook_outcomes.get(name, 0) + 1
@@ -144,7 +156,11 @@ class Harness:
 
         tools = ToolRegistry()
         register_skill_tool(tools, skills)
-        register_all(tools, hooks, index)
+        register_all(
+            tools, hooks, index, provider=provider, sub_model=config.sub_model,
+            subagent_max_rounds=config.subagent_max_rounds, thinking=config.thinking,
+            result_cap_chars=config.result_cap_chars,
+        )
 
         static = prompt.static_system_prompt(database.get_active_policies(), skills_index(skills))
         return cls(provider=provider, config=config, static_prompt=static, hooks=hooks, tools=tools, skills=skills, index=index)
@@ -179,6 +195,8 @@ class Harness:
                 provider_calls=books.provider_calls, tool_rounds=turn.tool_rounds,
                 tools_called=books.tools_called, skills_loaded=books.skills_loaded,
                 hook_outcomes=books.hook_outcomes, cache_hits=books.cache_hits,
+                subagent_calls=books.subagent_calls, subagent_prompt_tokens=books.subagent_prompt_tokens,
+                subagent_completion_tokens=books.subagent_completion_tokens,
                 latency_ms=int((time.perf_counter() - started) * 1000), error=error,
             ))
 
@@ -206,7 +224,7 @@ class Harness:
                         completion = event.completion
                 if completion is None:
                     raise RuntimeError("provider stream ended without a completion")
-                books.add_usage(completion.usage)
+                books.usage = books.usage + completion.usage
                 books.model = completion.model or books.model
 
                 if completion.tool_calls and asked_for_text:
@@ -217,7 +235,7 @@ class Harness:
                         reasoning_content=completion.reasoning_content,
                         finish_reason="stop", usage=completion.usage, model=completion.model,
                     )
-                assistant = _assistant_message(completion)
+                assistant = completion.to_message()
                 messages.append(assistant)
                 new_messages.append(assistant)
                 if not completion.tool_calls:
@@ -225,8 +243,7 @@ class Harness:
 
                 turn.tool_rounds += 1
                 for call in completion.tool_calls:
-                    result_message, events = self._run_tool(turn, call, books)
-                    yield from events
+                    result_message = yield from self._run_tool(turn, call, books)
                     messages.append(result_message)
                     new_messages.append(result_message)
         except GeneratorExit:
@@ -254,50 +271,80 @@ class Harness:
         })
 
     # ------------------------------------------------------------------
-    def _run_tool(self, turn: TurnState, call: ToolCall, books: _Books) -> tuple[dict[str, Any], list[TurnEvent]]:
-        """Dispatch one tool call through the hooks; return its tool message and the events to emit."""
-        events: list[TurnEvent] = [TurnEvent("tool_call", {"call_id": call.id, "name": call.name, "arguments": call.arguments})]
+    def _run_tool(self, turn: TurnState, call: ToolCall, books: _Books) -> Generator[TurnEvent, None, dict[str, Any]]:
+        """Dispatch one tool call through the hooks, yielding events as they happen; returns the tool message."""
+        yield TurnEvent("tool_call", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
         books.tools_called.append(call.name)
 
         tool = self.tools.get(call.name)
         if tool is None:
-            feedback = f"No tool named {call.name!r}. Available tools: {', '.join(self.tools.names())}."
-            return _tool_message(call, feedback), events
+            return _tool_message(call, f"No tool named {call.name!r}. Available tools: {', '.join(self.tools.names())}.")
 
         parsed = self.tools.parse_arguments(tool, call.arguments)
         if isinstance(parsed, str):
-            return _tool_message(call, parsed), events
+            return _tool_message(call, parsed)
 
         ctx = ToolUseContext(turn=turn, tool=tool, call_id=call.id, arguments=parsed)
         decision = self.hooks.run_pre_tool_use(ctx)
         if isinstance(decision.outcome, Deny):
             # The feedback is for the model; the customer's client only learns which hook spoke.
             books.outcome("denied")
-            events.append(TurnEvent("hook_blocked", {"call_id": call.id, "tool": call.name, "hook": decision.hook}))
-            return _tool_message(call, f"Blocked by {decision.hook}: {decision.outcome.feedback}"), events
+            yield TurnEvent("hook_blocked", {"call_id": call.id, "tool": call.name, "hook": decision.hook})
+            return _tool_message(call, f"Blocked by {decision.hook}: {decision.outcome.feedback}")
 
         if isinstance(decision.outcome, Replace):
             books.outcome("replaced")
             raw = decision.outcome.result
         else:
             books.outcome("allowed")
-            raw = self.tools.call(tool, ToolContext(turn.session_id, turn.customer_id), parsed)
+            raw = yield from self._call_streaming_progress(tool, turn, parsed)
+
         # A served (cached) result goes through PostToolUse too: source extraction must see it.
         result = self.hooks.run_post_tool_use(ctx, raw)
         if result is not raw:
             books.outcome("modified")
-        if result.meta.get("cached"):
+        cached = bool(result.meta.get("cached"))
+        if cached:
             books.cache_hits += 1
+        metering = result.meta.get("subagent")
+        if isinstance(metering, SubagentMetering) and not cached:  # a served brief is not a new delegation
+            books.add_subagent(metering)
 
         if skill := result.meta.get("skill"):
             books.skills_loaded.append(skill)
-            events.append(TurnEvent("skill_loaded", {"call_id": call.id, "name": skill}))
+            yield TurnEvent("skill_loaded", {"call_id": call.id, "name": skill})
         else:
-            events.append(TurnEvent("tool_result", {
+            yield TurnEvent("tool_result", {
                 "call_id": call.id, "name": call.name, "chars": len(result.content),
-                "cached": bool(result.meta.get("cached")), "is_error": result.is_error,
-            }))
-        return _tool_message(call, result.content), events
+                "cached": cached, "is_error": result.is_error,
+            })
+        return _tool_message(call, result.content)
+
+    def _call_streaming_progress(self, tool, turn: TurnState, parsed: dict[str, Any]) -> Generator[TurnEvent, None, ToolResult]:
+        """Run the tool on a worker thread and yield the progress it reports while it runs.
+
+        A sub-agent reports each of its rounds through `ToolContext.emit`; running the tool
+        off-thread lets those events reach the customer as they happen instead of in a burst
+        when the tool returns.
+        """
+        progress: queue.Queue[TurnEvent | None] = queue.Queue()
+        outcome: dict[str, Any] = {}
+        tool_ctx = ToolContext(turn.session_id, turn.customer_id, emit=lambda name, data: progress.put(TurnEvent(name, data)))
+
+        def work() -> None:
+            try:
+                outcome["result"] = self.tools.call(tool, tool_ctx, parsed)
+            except BaseException as exc:  # noqa: BLE001 — re-raised on the main thread below
+                outcome["error"] = exc
+            finally:
+                progress.put(None)
+
+        threading.Thread(target=work, name=f"tool:{tool.name}", daemon=True).start()
+        while (event := progress.get()) is not None:
+            yield event
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["result"]
 
     # ------------------------------------------------------------------
     def _bind_session(self, session_id: str, customer_id: str | None) -> dict[str, Any]:
@@ -324,18 +371,6 @@ class Harness:
         )
         block = "\n\n".join(self.hooks.run_session_start(ctx))
         return database.create_session(session_id, ctx.customer_id, block)
-
-
-def _assistant_message(completion: Completion) -> dict[str, Any]:
-    msg: dict[str, Any] = {"role": "assistant", "content": completion.content}
-    if completion.reasoning_content:
-        msg["reasoning_content"] = completion.reasoning_content
-    if completion.tool_calls:
-        msg["tool_calls"] = [
-            {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
-            for c in completion.tool_calls
-        ]
-    return msg
 
 
 def _tool_message(call: ToolCall, content: str) -> dict[str, Any]:

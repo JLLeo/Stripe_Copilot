@@ -21,12 +21,20 @@ from typing import Any, Callable
 # ---------------------------------------------------------------------------
 # What a tool receives and returns
 # ---------------------------------------------------------------------------
+EventSink = Callable[[str, dict[str, Any]], None]  # (event name, payload) -> None
+
+
+def _drop_event(name: str, data: dict[str, Any]) -> None:
+    """Default event sink: a tool run outside a turn has nowhere to report progress."""
+
+
 @dataclass(frozen=True)
 class ToolContext:
-    """What a tool may know about the conversation it runs in."""
+    """What a tool may know about the conversation it runs in, and how it reports progress."""
 
     session_id: str
     customer_id: str | None
+    emit: EventSink = _drop_event  # progress events for the customer's client, forwarded as they happen
 
 
 @dataclass(frozen=True)
@@ -107,3 +115,13 @@ class ToolRegistry:
             return tool.run(ctx, args)
         except Exception as exc:  # noqa: BLE001 — a failing tool is feedback, not a crash
             return ToolResult.error(f"{tool.name} failed: {type(exc).__name__}: {exc}")
+
+    def dispatch(self, name: str, raw_arguments: str, ctx: ToolContext) -> ToolResult:
+        """Look up, parse and call in one step; every failure is an error result the model can read."""
+        tool = self.get(name)
+        if tool is None:
+            return ToolResult.error(f"No tool named {name!r} here. Available: {', '.join(self.names())}.")
+        parsed = self.parse_arguments(tool, raw_arguments)
+        if isinstance(parsed, str):
+            return ToolResult.error(parsed)
+        return self.call(tool, ctx, parsed)

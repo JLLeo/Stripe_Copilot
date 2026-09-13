@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS turn_metrics (
     skills_json        TEXT DEFAULT '[]',
     hooks_json         TEXT DEFAULT '{}',
     cache_hits         INTEGER DEFAULT 0,
+    subagent_calls     INTEGER DEFAULT 0,
+    subagent_prompt_tokens     INTEGER DEFAULT 0,
+    subagent_completion_tokens INTEGER DEFAULT 0,
     latency_ms         INTEGER DEFAULT 0,
     error              TEXT
 )
@@ -93,6 +96,9 @@ class TurnRecord:
     skills_loaded: list[str] = field(default_factory=list)
     hook_outcomes: dict[str, int] = field(default_factory=dict)  # allowed / denied / replaced / modified / hard_stop
     cache_hits: int = 0
+    subagent_calls: int = 0  # delegations to a sub-agent this turn; their tokens are metered apart from the main model
+    subagent_prompt_tokens: int = 0
+    subagent_completion_tokens: int = 0
     latency_ms: int = 0
     error: str | None = None
 
@@ -107,8 +113,9 @@ def record_turn(record: TurnRecord) -> None:
                 turn_id, session_id, customer_id, created_at, model,
                 prompt_tokens, completion_tokens, reasoning_tokens,
                 cache_hit_tokens, cache_miss_tokens, provider_calls,
-                tool_rounds, tools_json, skills_json, hooks_json, cache_hits, latency_ms, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tool_rounds, tools_json, skills_json, hooks_json, cache_hits,
+                subagent_calls, subagent_prompt_tokens, subagent_completion_tokens, latency_ms, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.turn_id, record.session_id, record.customer_id,
@@ -116,7 +123,9 @@ def record_turn(record: TurnRecord) -> None:
                 record.prompt_tokens, record.completion_tokens, record.reasoning_tokens,
                 record.cache_hit_tokens, record.cache_miss_tokens, record.provider_calls,
                 record.tool_rounds, json.dumps(record.tools_called), json.dumps(record.skills_loaded),
-                json.dumps(record.hook_outcomes), record.cache_hits, record.latency_ms, record.error,
+                json.dumps(record.hook_outcomes), record.cache_hits,
+                record.subagent_calls, record.subagent_prompt_tokens, record.subagent_completion_tokens,
+                record.latency_ms, record.error,
             ),
         )
         conn.commit()
@@ -144,7 +153,9 @@ def summary(days: int = 7) -> dict[str, Any]:
             SUM(prompt_tokens + completion_tokens)     AS total_tokens,
             SUM(tool_rounds)                           AS tool_rounds,
             SUM(cache_hits)                            AS tool_cache_hits,
-            AVG(provider_calls)                        AS avg_provider_calls
+            AVG(provider_calls)                        AS avg_provider_calls,
+            SUM(subagent_calls)                        AS subagent_calls,
+            SUM(subagent_prompt_tokens + subagent_completion_tokens) AS subagent_tokens
         FROM turn_metrics
         WHERE created_at >= ?
         """,
@@ -166,6 +177,8 @@ def summary(days: int = 7) -> dict[str, Any]:
         "tool_rounds": row["tool_rounds"] or 0,
         "tool_cache_hits": row["tool_cache_hits"] or 0,
         "avg_provider_calls": round(row["avg_provider_calls"] or 0.0, 2),
+        "subagent_calls": row["subagent_calls"] or 0,
+        "subagent_tokens": row["subagent_tokens"] or 0,
     }
 
 

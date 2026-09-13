@@ -12,7 +12,7 @@ its usage. Callers that want the whole answer at once use `drain()`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Iterator, Protocol, Sequence
 
 
@@ -23,6 +23,9 @@ class Usage:
     reasoning_tokens: int = 0
     cache_hit_tokens: int = 0
     cache_miss_tokens: int = 0
+
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(**{f.name: getattr(self, f.name) + getattr(other, f.name) for f in fields(Usage)})
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,21 @@ class Completion:
     finish_reason: str = "stop"
     usage: Usage = field(default_factory=Usage)
     model: str = ""
+
+    def to_message(self) -> dict[str, Any]:
+        """The assistant message to append to a conversation, in Chat Completions shape.
+
+        `reasoning_content` is kept: DeepSeek requires it back whenever `tools` are present.
+        """
+        msg: dict[str, Any] = {"role": "assistant", "content": self.content}
+        if self.reasoning_content:
+            msg["reasoning_content"] = self.reasoning_content
+        if self.tool_calls:
+            msg["tool_calls"] = [
+                {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
+                for c in self.tool_calls
+            ]
+        return msg
 
 
 @dataclass(frozen=True)

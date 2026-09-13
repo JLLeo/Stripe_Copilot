@@ -38,14 +38,19 @@ def make_turn_budget(rounds: int):
 # ---------------------------------------------------------------------------
 # result_cap — PostToolUse
 # ---------------------------------------------------------------------------
+def cap_result(result: ToolResult, max_chars: int) -> ToolResult | None:
+    """The result truncated at a boundary with a note, or None if it already fits."""
+    text = result.content
+    if len(text) <= max_chars:
+        return None
+    cut = _boundary(text, max_chars)
+    note = TRUNCATION_NOTE.format(shown=cut, total=len(text))
+    return ToolResult(content=text[:cut] + note, is_error=result.is_error, meta={**result.meta, "truncated": True})
+
+
 def make_result_cap(max_chars: int):
     def result_cap(ctx: ToolUseContext, result: ToolResult) -> ToolResult | None:
-        text = result.content
-        if len(text) <= max_chars:
-            return None
-        cut = _boundary(text, max_chars)
-        note = TRUNCATION_NOTE.format(shown=cut, total=len(text))
-        return ToolResult(content=text[:cut] + note, is_error=result.is_error, meta={**result.meta, "truncated": True})
+        return cap_result(result, max_chars)
 
     return result_cap
 

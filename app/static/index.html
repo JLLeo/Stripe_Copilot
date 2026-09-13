@@ -58,6 +58,8 @@
   .act .args { color: var(--text); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52ch; }
   .act .r { flex: 0 0 auto; }
   .act .r.cached::after { content: " · cached"; color: var(--ok); }
+  .act.sub { padding-left: 18px; }
+  .act.sub .k { color: var(--muted); }
   .sources { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
   .sources a { font-size: 12px; color: var(--accent-2); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
   .sources a:hover { border-color: var(--accent-2); }
@@ -215,6 +217,9 @@
           else if (event === "skill_loaded") { const row = pending[data.call_id]; if (row) { row.querySelector(".k").textContent = "Skill"; row.querySelector(".args").textContent = data.name; row.querySelector(".r").textContent = "loaded"; } }
           else if (event === "tool_result") { const row = pending[data.call_id]; if (row) { const r = row.querySelector(".r"); r.textContent = data.is_error ? "error" : `${data.chars} chars`; if (data.cached) r.classList.add("cached"); if (data.is_error) row.classList.add("error"); } }
           else if (event === "hook_blocked") { const row = pending[data.call_id]; if (row) { row.classList.add("blocked"); row.querySelector(".r").textContent = `blocked by ${data.hook}`; } }
+          else if (event === "subagent_started") { addActivity(reply, "sub", data.name, "started", { text: "" }); setStatus(reply, `${data.name} in progress`); }
+          else if (event === "subagent_tool_call") { addActivity(reply, "sub", `${data.name} › ${data.tool}`, shortArgs(data.arguments)); }
+          else if (event === "subagent_finished") { addActivity(reply, "sub", data.name, `${data.tool_calls} tool call${data.tool_calls === 1 ? "" : "s"}`, { text: data.gave_up ? "no brief (budget reached)" : data.stopped_by_cap ? "brief (budget reached)" : "brief" }); }
           else if (event === "text_delta") { if (!bubble.textContent) setStatus(reply, ""); bubble.textContent += data.text || ""; scroll(); }
           else if (event === "done") finish(reply, data);
           else if (event === "error") { bubble.textContent = data.reply || "Something went wrong."; bubble.classList.add("error"); setStatus(reply, ""); }
