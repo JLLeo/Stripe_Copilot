@@ -81,10 +81,13 @@ stripe-sales-copilot/
 │   ├── sales/                # Internal sales playbook
 │   └── knowledge_graph.yaml  # 80 entities, 150 relationships
 ├── data/
-│   └── stripe_sales_copilot.db  # SQLite: 5 tables + session_memory + turn_metrics
+│   ├── seed.db               # SQLite, tracked, read-only: customers, products, usage, policies
+│   └── runtime.db            # SQLite, gitignored, created on first start: sessions, interactions, metrics
+├── scripts/
+│   └── build_seed_db.py      # Rebuild data/seed.db from data.xlsx
 ├── milvus.db/                # Milvus Lite (278 chunks, 1536-dim)
-├── tests/                    # pytest suite — 198 unit + 5 integration-marked
-│   ├── conftest.py           # sys.path bootstrap + excludes integration/
+├── tests/                    # pytest suite — 206 unit + 5 integration-marked
+│   ├── conftest.py           # sys.path bootstrap, excludes integration/, isolates the runtime DB
 │   ├── test_escalation.py    # Escalation gating logic
 │   ├── test_kg_retriever.py  # Keyword matching + graph traversal
 │   ├── test_intent.py        # Intent classification
@@ -118,6 +121,9 @@ pip install -r requirements.txt
 
 # Configure
 # Edit .env: OPENAI_API_KEY=sk-...
+
+# Rebuild the seed database (only after editing data.xlsx — data/seed.db is tracked)
+python scripts/build_seed_db.py
 
 # Build Milvus index (first time only)
 python -m app.milvus_loader --force
@@ -165,7 +171,7 @@ http://127.0.0.1:8000/docs
 ### Unit tests (fast — no LLM, no Milvus)
 
 ```bash
-# Full unit suite: 198 tests in ~5s
+# Full unit suite: 206 tests in ~5s
 pytest -m "not integration"
 
 # Single module
@@ -185,6 +191,8 @@ pytest -m "not integration" --cov=app --cov-report=term-missing
 | `tests/test_context.py` | 18 | Token budget, truncation, layered assembly |
 | `tests/test_tools.py` | 16 (+1 integration) | Structured JSON output, registry consistency |
 | `tests/test_metrics.py` | 16 | Metric collection, token accounting, stage latency |
+| `tests/test_database.py` | 7 | Seed / runtime split: read-only seed, runtime created on init, clean working tree |
+| `tests/test_api_customers.py` | 1 | Customer list served through the shared connection |
 
 ### Integration scripts (calls LLM + Milvus)
 
@@ -230,13 +238,13 @@ they are separated by marker, not by directory.
 | Escalation tiers | 3 (rule → context LLM → stay) |
 | Auto-escalate scenarios | 4 of 14 |
 | Escalation teams | 7 |
-| Unit tests | 198 (~5s, no external deps) + 5 integration |
+| Unit tests | 206 (~5s, no external deps) + 5 integration |
 | Tool output format | Structured JSON (`_ok` / `_empty` / `ERROR:`) |
 | Tool cache | 15 min TTL, 50 entries/session, 200 sessions |
 | Metrics per turn | intent path, tools, tokens, stage latency, cache hits |
 | Context layers | 3 (summary → recent raw → older truncated) |
 | Conversation retention | Last 3 turns raw, older LLM-compressed |
-| SQL tables in use | 7 (5 existing + session_memory + turn_metrics) |
+| SQL tables in use | 7 — 4 seed (read-only, tracked) + 3 runtime (gitignored) |
 | LLM calls per query | 3-6 (THINK×N + SYNTH×2, optional INTENT/escalation fallback) |
 | Max ReAct iterations | 0-3 per scenario (measured avg 1.30) |
 | Measured avg latency | 9.9s over 20 turns (SYNTH is 60-70%) |

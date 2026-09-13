@@ -32,6 +32,9 @@ milvus-lite>=3.1.0
 networkx>=3.5
 PyYAML>=6.0.0
 
+# Seed database build (scripts/build_seed_db.py reads data.xlsx)
+openpyxl>=3.1.0
+
 # HTTP (transitive)
 httpx>=0.28.0
 

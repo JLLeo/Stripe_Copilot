@@ -18,3 +18,9 @@ __pycache__/
 
 # Personal notes — not for the repo
 INTERVIEW.md
+
+# Runtime database and SQLite sidecars (the seed database stays tracked)
+data/runtime.db
+data/*.db-wal
+data/*.db-shm
+data/*.building

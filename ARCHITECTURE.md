@@ -4,10 +4,10 @@
 
 KG + Milvus RAG pipeline wrapped in a hand-rolled ReAct agent loop.
 Intent-first routing with LLM fallback. Scenario-specific Skill configs. Strict escalation gating.
-Existing SQLite database (`data/stripe_sales_copilot.db`) reused for customer lookups.
+Existing SQLite database (`data/seed.db + data/runtime.db`) reused for customer lookups.
 
 **Scale as deployed:** 21 KB documents · 80 KG entities / 150 relationships · 278 Milvus chunks ·
-6 tools · 14 skill configs (13 classifiable scenarios) · 7 SQLite tables · 198 unit tests
+6 tools · 14 skill configs (13 classifiable scenarios) · 7 SQLite tables · 206 unit tests
 
 ---
 
@@ -563,17 +563,33 @@ LLM decides the rest.
 
 ## Data Layer
 
-### SQLite — `data/stripe_sales_copilot.db`
+### SQLite — `data/seed.db` + `data/runtime.db`
 
-| Table | Rows | Origin | Used by |
+Two files, one connection. Domain data that never changes at runtime is the
+**seed database** — tracked in git, rebuilt from `data.xlsx` with
+`python scripts/build_seed_db.py`, and opened **read-only**. Everything the agent
+writes goes to the **runtime database** — gitignored and created on first start —
+so running tests or a demo never dirties the working tree.
+
+| Database | Table | Rows | Used by |
 |---|---|---|---|
-| `customers` | 30 | pre-existing | `lookup_customer_tool`, escalation volume checks, `/api/customers` |
-| `stripe_products` | 26 | pre-existing | joined into product usage lookups |
-| `customer_product_usage` | 81 | pre-existing | `lookup_product_usage_tool` |
-| `sales_policy_updates` | 20 | pre-existing | `lookup_policy_tool` |
-| `sales_interactions` | 97 | pre-existing | written per turn by `log_interaction()` |
-| `session_memory` | 119 | added | conversation persistence |
-| `turn_metrics` | 20 | added | observability |
+| seed (tracked, read-only) | `customers` | 30 | `lookup_customer_tool`, escalation volume checks, `/api/customers` |
+| seed | `stripe_products` | 26 | joined into product usage lookups |
+| seed | `customer_product_usage` | 81 | `lookup_product_usage_tool` |
+| seed | `sales_policy_updates` | 20 | `lookup_policy_tool` |
+| runtime (ignored) | `session_memory` | — | Session persistence |
+| runtime | `sales_interactions` | — | written per turn by `log_interaction()` |
+| runtime | `turn_metrics` | — | observability |
+
+`get_connection()` [database.py](app/database.py) opens the runtime file as the
+main database (`journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`,
+`check_same_thread=False`) and `ATTACH`es the seed file with `mode=ro`. SQLite
+resolves an unqualified table name against the main database first and then the
+attached one, so callers write `SELECT * FROM customers` exactly as before — and
+any `INSERT` into a seed table fails with a read-only error rather than silently
+modifying a tracked file. `database.py` is the only module that knows which table
+lives where. The seed is built with a rollback journal (not WAL) so no `-wal` /
+`-shm` sidecars appear beside a tracked file.
 
 ```sql
 CREATE TABLE IF NOT EXISTS session_memory (
@@ -585,11 +601,14 @@ CREATE TABLE IF NOT EXISTS session_memory (
 );
 ```
 
-The FK to `customers` was removed after it rejected sessions with no customer
-selected; `save_session()` normalizes `""` → `NULL` instead.
+`sales_interactions` carries no foreign key to `customers` either: SQLite cannot
+reference a table in an attached database. The spreadsheet's historical
+`sales_interactions` sheet is no longer imported — the table is runtime state and
+starts empty; nothing reads the old rows.
 
-Connection [database.py:27](app/database.py#L27): one cached connection,
-`check_same_thread=False`, `journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`.
+Both locations can be overridden with `SEED_DB_PATH` / `RUNTIME_DB_PATH`; the test
+suite points `RUNTIME_DB_PATH` at a temp file for the whole session
+([tests/conftest.py](tests/conftest.py)).
 
 ### Knowledge graph — `knowledge_base/knowledge_graph.yaml`
 
@@ -689,7 +708,7 @@ two files per call).
 Two tiers, split by **how they run**, not just by what they touch:
 
 ```
-tests/*.py                  pytest modules — 198 unit + 5 integration-marked
+tests/*.py                  pytest modules — 206 unit + 5 integration-marked
 tests/integration/*.py      standalone scripts — top-level code, run directly
 ```
 
@@ -699,7 +718,7 @@ the directory (`collect_ignore_glob = ["integration/*"]`) and puts the project
 root on `sys.path` so both tiers import `app` regardless of working directory.
 
 ```
-pytest -m "not integration"            198 tests, ~5s, no LLM / no Milvus
+pytest -m "not integration"            206 tests, ~5s, no LLM / no Milvus
 pytest                                 203 tests (5 integration-marked)
 python tests/integration/test_e2e.py   4 conversations, 12 turns, end-to-end
 ```
@@ -753,8 +772,8 @@ app/
 └── static/index.html     SSE chat UI
 
 tests/
-├── conftest.py           sys.path bootstrap + excludes integration/ from pytest
-├── test_*.py             pytest suite (8 modules, 198 unit + 5 marked)
+├── conftest.py           sys.path bootstrap, excludes integration/, isolates the runtime DB from pytest
+├── test_*.py             pytest suite (10 modules, 206 unit + 5 marked)
 └── integration/          standalone runnable scripts (see its README)
 ```
 
