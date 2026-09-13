@@ -17,4 +17,6 @@ class ChatResponse(BaseModel):
     reply: str
     usage: dict[str, int] | None = None
     latency_ms: int | None = None
+    tool_rounds: int | None = None
+    sources: list[dict[str, str]] = Field(default_factory=list)
     error: str | None = None

@@ -43,6 +43,7 @@ from app.harness.skills import Skill, load_skills, register_skill_tool, skills_i
 from app.harness.tools import ToolContext, ToolRegistry, ToolResult
 from app.metrics import TurnRecord, record_turn
 from app.paths import SKILLS_DIR
+from app.retrieval.index import DEFAULT_MILVUS_URI, KnowledgeIndex
 from app.tools import register_all
 
 FRIENDLY_FAILURE = (
@@ -72,6 +73,7 @@ class HarnessConfig:
     tool_round_budget: int = 8  # model responses with tool calls allowed per turn
     result_cap_chars: int = 6000  # ≈1.5K tokens; larger tool results are truncated
     tool_cache_ttl_seconds: float = 900.0
+    milvus_uri: str = DEFAULT_MILVUS_URI
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -83,6 +85,7 @@ class HarnessConfig:
             tool_round_budget=int(os.environ.get("HARNESS_TOOL_ROUND_BUDGET", cls.tool_round_budget)),
             result_cap_chars=int(os.environ.get("HARNESS_RESULT_CAP_CHARS", cls.result_cap_chars)),
             tool_cache_ttl_seconds=float(os.environ.get("HARNESS_TOOL_CACHE_TTL_SECONDS", cls.tool_cache_ttl_seconds)),
+            milvus_uri=os.environ.get("MILVUS_URI", cls.milvus_uri),
         )
 
 
@@ -121,6 +124,7 @@ class Harness:
     hooks: HookRegistry
     tools: ToolRegistry
     skills: dict[str, Skill]
+    index: KnowledgeIndex
 
     @classmethod
     def build(cls, provider: Provider, config: HarnessConfig | None = None) -> "Harness":
@@ -128,10 +132,7 @@ class Harness:
         config = config or HarnessConfig.from_env()
         skills = load_skills(config.skills_dir)
 
-        tools = ToolRegistry()
-        register_skill_tool(tools, skills)
-        register_all(tools)
-
+        index = KnowledgeIndex(provider=provider, milvus_uri=config.milvus_uri)
         hooks = HookRegistry()
         hooks.register(HookEvent.SESSION_START, _profile_hook)
         guardrails.register_defaults(
@@ -141,8 +142,16 @@ class Harness:
             cache=guardrails.ToolCache(ttl_seconds=config.tool_cache_ttl_seconds),
         )
 
+        tools = ToolRegistry()
+        register_skill_tool(tools, skills)
+        register_all(tools, hooks, index)
+
         static = prompt.static_system_prompt(database.get_active_policies(), skills_index(skills))
-        return cls(provider=provider, config=config, static_prompt=static, hooks=hooks, tools=tools, skills=skills)
+        return cls(provider=provider, config=config, static_prompt=static, hooks=hooks, tools=tools, skills=skills, index=index)
+
+    def close(self) -> None:
+        """Release the knowledge index connection (Milvus Lite holds a file handle)."""
+        self.index.close()
 
     # ------------------------------------------------------------------
     def run_turn(self, session_id: str, customer_id: str | None, message: str) -> Iterator[TurnEvent]:
@@ -241,6 +250,7 @@ class Harness:
             "usage": asdict(books.usage),
             "latency_ms": int((time.perf_counter() - started) * 1000),
             "tool_rounds": turn.tool_rounds,
+            "sources": turn.sources,
         })
 
     # ------------------------------------------------------------------
@@ -268,13 +278,14 @@ class Harness:
 
         if isinstance(decision.outcome, Replace):
             books.outcome("replaced")
-            result = decision.outcome.result
+            raw = decision.outcome.result
         else:
             books.outcome("allowed")
             raw = self.tools.call(tool, ToolContext(turn.session_id, turn.customer_id), parsed)
-            result = self.hooks.run_post_tool_use(ctx, raw)
-            if result is not raw:
-                books.outcome("modified")
+        # A served (cached) result goes through PostToolUse too: source extraction must see it.
+        result = self.hooks.run_post_tool_use(ctx, raw)
+        if result is not raw:
+            books.outcome("modified")
         if result.meta.get("cached"):
             books.cache_hits += 1
 

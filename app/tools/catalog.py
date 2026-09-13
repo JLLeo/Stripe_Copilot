@@ -4,11 +4,11 @@ list_products and get_pricing — the catalogue and Stripe's public prices.
 `list_products` reads the product catalogue from the seed database.
 
 `get_pricing` reads Public Knowledge only: the `## Price` section of every
-knowledge-base document whose header says `Access Level: public`, plus the
-three price sections of the pricing overview. Documents marked otherwise are
-never opened, so nothing staff-facing can reach the conversation (ADR 0003).
-The seed database holds no prices, which is why this tool reads documents
-rather than SQL.
+document the public-only loader returns, plus the three price sections of the
+pricing overview. The loader is the single place that applies the public rule,
+so nothing staff-facing can reach the conversation (ADR 0003). The seed
+database holds no prices, which is why this tool reads documents rather than
+SQL.
 
 When nothing matches, the tool says so. It never guesses a price.
 """
@@ -18,11 +18,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 
 from app import database
 from app.harness.tools import Tool, ToolContext, ToolRegistry, ToolResult
 from app.paths import KNOWLEDGE_BASE_DIR
+from app.retrieval.documents import header, load_public_documents
+from app.retrieval.graph import KnowledgeGraph
 
 PRICING_SOURCE = "https://stripe.com/pricing"
 # Sections of the pricing overview that hold customer-facing price lines.
@@ -58,11 +59,6 @@ class PriceEntry:
     source: str  # the document's public URL, or its path
 
 
-def _header(text: str, key: str) -> str:
-    match = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE)
-    return match.group(1).strip() if match else ""
-
-
 def _section_lines(text: str, heading_pattern: str) -> list[str]:
     """Bullet and plain lines under a heading, up to the next heading of the same or higher level."""
     out: list[str] = []
@@ -83,24 +79,20 @@ def _section_lines(text: str, heading_pattern: str) -> list[str]:
 
 @lru_cache(maxsize=1)
 def _price_entries() -> tuple[PriceEntry, ...]:
-    """Every public document's price lines, read once."""
+    """Every public document's price lines, read once through the one public-only loader (ADR 0003)."""
     entries: list[PriceEntry] = []
-    for path in sorted(KNOWLEDGE_BASE_DIR.rglob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        if _header(text, "Access Level").lower() != "public":
-            continue  # structural exclusion: non-public material is never parsed
-        lines = _section_lines(text, r"Price")
-        if path.name == "pricing_overview.md":
+    for doc in load_public_documents(KNOWLEDGE_BASE_DIR, KnowledgeGraph()):
+        lines = _section_lines(doc.body, r"Price")
+        if doc.path.name == "pricing_overview.md":
             for section in OVERVIEW_SECTIONS:
-                lines += _section_lines(text, re.escape(section))
+                lines += _section_lines(doc.body, re.escape(section))
         if not lines:
             continue
-        title = next((l[2:].strip() for l in text.splitlines() if l.startswith("# ")), path.stem)
         entries.append(PriceEntry(
-            product=_header(text, "Product") or path.stem,
-            title=title,
+            product=header(doc.body, "Product") or doc.doc_id,
+            title=doc.title,
             lines=tuple(dict.fromkeys(lines)),  # de-duplicate, keep order
-            source=_header(text, "Source URL") or str(path.relative_to(KNOWLEDGE_BASE_DIR.parent)),
+            source=doc.source_url or str(doc.path.relative_to(KNOWLEDGE_BASE_DIR.parent)),
         ))
     return tuple(entries)
 

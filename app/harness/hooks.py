@@ -18,7 +18,7 @@ STOP and SESSION_END gain their dispatchers with the tickets that need them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
@@ -52,6 +52,7 @@ class TurnState:
     customer_id: str | None
     tool_rounds: int = 0  # model responses that carried tool calls, so far this turn
     tools_exhausted: bool = False  # set by turn_budget once it has denied a call this turn
+    sources: list[dict[str, str]] = field(default_factory=list)  # collected by source_extraction for the reply
 
 
 @dataclass(frozen=True)

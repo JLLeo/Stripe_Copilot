@@ -15,12 +15,7 @@ python-dotenv>=1.2.0
 # Models (DeepSeek chat + OpenAI embeddings, both via the openai client)
 openai>=2.30.0
 
-# Retained by the not-yet-rewired Milvus ingestion/retrieval modules (removed with the knowledge-search ticket)
-langchain-core>=1.2.0
-langchain-openai>=1.1.0
-langchain-text-splitters>=0.3.0
-
-# Vector database
+# Vector database (dense + BM25 sparse collections, Milvus Lite)
 pymilvus>=3.0.0
 milvus-lite>=3.1.0
 

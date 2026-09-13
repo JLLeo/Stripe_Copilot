@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
         load_dotenv()  # DEEPSEEK_API_KEY / OPENAI_API_KEY for the production provider
         app.state.harness = Harness.build(provider=DeepSeekProvider.from_env())
     yield
+    app.state.harness.close()
 
 
 app = FastAPI(

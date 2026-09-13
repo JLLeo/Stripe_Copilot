@@ -8,8 +8,9 @@ built. That recorded list is how tests observe things the HTTP response never
 shows: prefix stability, what a sub-agent was and wasn't told, which skill body
 was loaded.
 
-Embeddings are deterministic unit vectors derived from the text, so retrieval
-fixtures can be built without a network.
+Embeddings are deterministic bag-of-words vectors: each token hashes to a
+direction, so texts that share words have similar vectors. Not semantic, but
+enough for a dense retrieval leg to behave sensibly in tests, with no network.
 """
 
 from __future__ import annotations
@@ -70,13 +71,12 @@ class ScriptedProvider:
         return [self._vector(t) for t in texts]
 
     def _vector(self, text: str) -> list[float]:
-        seed = hashlib.sha256(text.encode("utf-8")).digest()
-        raw = []
-        counter = 0
-        while len(raw) < self._embedding_dim:
-            block = hashlib.sha256(seed + counter.to_bytes(4, "big")).digest()
-            raw.extend(b / 255.0 - 0.5 for b in block)
-            counter += 1
-        raw = raw[: self._embedding_dim]
+        raw = [0.0] * self._embedding_dim
+        tokens = re.findall(r"[a-z0-9]+", text.lower()) or [text]
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            for i in range(0, len(digest) - 1, 2):
+                slot = int.from_bytes(digest[i:i + 2], "big") % self._embedding_dim
+                raw[slot] += 1.0 if digest[i] & 1 else -1.0
         norm = math.sqrt(sum(x * x for x in raw)) or 1.0
         return [x / norm for x in raw]

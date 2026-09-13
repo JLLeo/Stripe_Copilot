@@ -5,9 +5,10 @@ style of Claude Code: the model decides what to do on every turn; deterministic 
 only builds the request, moves bytes, and guards the edges.
 
 This branch is a ground-up rebuild in progress. Today a customer signs in, asks a
-question, and watches the agent load the relevant skill, look up the profile, catalogue
-or public pricing, and answer — every step streamed, every turn metered. Knowledge
-search, clarifying questions, handoff, and memory land ticket by ticket
+question, and watches the agent load the relevant skill, search Stripe's public
+documentation, look up the profile, catalogue or pricing, and answer with sources —
+every step streamed, every turn metered. The research sub-agent, clarifying questions,
+handoff, and memory land ticket by ticket
 ([issues #5–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
 
 ---
@@ -25,7 +26,7 @@ customer message  ─►  /sales-agent/stream
              │  2. assemble request        │   static prompt · tools · customer · memory
              │  3. Provider.complete       │   DeepSeek, streamed
              │  4. tool calls?             │   PreToolUse → run → PostToolUse,
-             │     └─ round again          │   Skill / get_my_profile / list_products / get_pricing
+             │     └─ round again          │   Skill / search_knowledge / get_my_profile / …
              │  5. append every message    │   working memory
              │  6. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
              └─────────────────────────────┘
@@ -61,13 +62,17 @@ stripe-sales-copilot/
 │   │   ├── hooks.py          # Hook events; SessionStart / PreToolUse / PostToolUse dispatch
 │   │   ├── guardrails.py     # turn_budget, result_cap, tool cache
 │   │   └── core.py           # Harness.run_turn — the loop with tool rounds
+│   ├── retrieval/
+│   │   ├── graph.py          # Knowledge graph: entities, one-hop expansion
+│   │   ├── linking.py        # Entity Linking vocabulary, expansion, filter; keyword fallback
+│   │   ├── chunking.py       # Heading-aware markdown chunker (no framework)
+│   │   ├── documents.py      # Public documents only, with graph metadata
+│   │   ├── index.py          # Dense + BM25 collections, RRF fusion, search
+│   │   └── ingest.py         # python -m app.retrieval.ingest (always a full rebuild)
 │   ├── tools/
 │   │   ├── profile.py        # get_my_profile() — no arguments, bound customer only
-│   │   └── catalog.py        # list_products(group?), get_pricing(product)
-│   ├── kg_builder.py         # Knowledge graph loader (retained; rewired in #6)
-│   ├── kg_retriever.py       # Entity linking + graph expansion (retained; rewired in #6)
-│   ├── milvus_retriever.py   # Milvus search (retained; rewired in #6)
-│   ├── milvus_loader.py      # Ingestion (retained; rewritten in #6)
+│   │   ├── catalog.py        # list_products(group?), get_pricing(product)
+│   │   └── knowledge.py      # search_knowledge(question, products[], topics[]) + source_extraction
 │   └── static/index.html     # Customer chat UI
 ├── data/
 │   ├── seed.db               # Tracked, read-only: customers, products, usage, policies
@@ -75,8 +80,8 @@ stripe-sales-copilot/
 ├── scripts/build_seed_db.py  # Rebuild data/seed.db from data.xlsx
 ├── skills/<name>/SKILL.md    # 7 product skills the model loads on demand
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
-├── milvus.db/                # Milvus Lite index (278 chunks)
-├── tests/                    # 92 tests, no network, ~3s
+├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
+├── tests/                    # 70 tests, no network, ~12s (builds a real Milvus Lite fixture)
 ├── docs/adr/                 # Architecture decision records
 ├── CONTEXT.md                # Domain glossary
 └── ARCHITECTURE.md
@@ -96,6 +101,9 @@ OPENAI_API_KEY=sk-...        # embeddings only (text-embedding-3-small)
 # Rebuild the seed database — only after editing data.xlsx; data/seed.db is tracked
 python scripts/build_seed_db.py
 
+# Rebuild the knowledge index — only after editing knowledge_base/; milvus.db/ is tracked
+python -m app.retrieval.ingest
+
 # Run
 python -m uvicorn app.main:app --reload
 # UI     http://127.0.0.1:8000/
@@ -104,7 +112,8 @@ python -m uvicorn app.main:app --reload
 
 Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_MAX_TOKENS`,
 `HARNESS_THINKING=enabled|disabled`, `HARNESS_TOOL_ROUND_BUDGET` (8), `HARNESS_RESULT_CAP_CHARS`
-(6000), `HARNESS_TOOL_CACHE_TTL_SECONDS` (900), `HARNESS_SKILLS_DIR`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`.
+(6000), `HARNESS_TOOL_CACHE_TTL_SECONDS` (900), `HARNESS_SKILLS_DIR`, `MILVUS_URI`, `SEED_DB_PATH`,
+`RUNTIME_DB_PATH`.
 
 ## API
 
@@ -112,7 +121,7 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_MAX_TOKENS`,
 |---|---|---|
 | `GET` | `/` | Customer chat UI |
 | `GET` | `/api/customers` | Customers for the sign-in selector |
-| `POST` | `/sales-agent/chat` | One turn, JSON reply. `404` unknown customer, `409` session already bound to another customer |
+| `POST` | `/sales-agent/chat` | One turn, JSON reply with `sources`. `404` unknown customer, `409` session already bound to another customer |
 | `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked`), `text_delta`*, then `done` or `error` |
 | `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, calls per tool |
 
@@ -128,7 +137,7 @@ customer on first contact and refuses to switch.
 ## Testing
 
 ```bash
-pytest            # 92 tests in ~3s; no model calls, temp runtime database
+pytest            # 70 tests in ~12s; no model calls; temp runtime DB and a temp Milvus Lite index
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
@@ -140,10 +149,10 @@ what the customer block contained, that no timestamp leaked into the cached pref
 |---|---|
 | `tests/test_harness_chat.py` | The turn end to end: fixed order, prefix stability, SessionStart block, prospect sessions, unknown/mismatched customer, SSE incl. `thinking`, friendly failure, disconnect metering, metrics |
 | `tests/test_tools_and_skills.py` | Skill index vs body, Skill → tool → answer, parallel skill loads, profile scoping, catalogue and pricing tools, argument feedback, `turn_budget`, `result_cap`, tool cache, prefix stability with tools, tool metrics, SSE tool events |
+| `tests/test_knowledge_search.py` | A fixture knowledge base indexed through the fake embedder: public-only in both collections, chunking, vocabulary from the graph, one-hop expansion, keyword fallback, filter expression, fused ranking, the `search_knowledge` tool, `sources` on `done` |
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
 | `tests/test_api_customers.py` | Customer list served through the shared connection |
-| `tests/test_kg_retriever.py` | Knowledge-graph entity matching and expansion (retained module) |
 
 Running the suite leaves `git status` clean: the suite uses its own runtime database.
 
@@ -161,13 +170,31 @@ them. Adding a behaviour is adding a file.
 | `get_my_profile()` | the bound customer's profile and products in use — no arguments, so no way to ask about anyone else |
 | `list_products(group?)` | the catalogue from the seed database |
 | `get_pricing(product)` | public list prices for the product, read from the `Price` sections of knowledge-base documents marked `Access Level: public` (the seed database holds no prices); when nothing matches it says so instead of guessing |
+| `search_knowledge(question, products[], topics[])` | passages from Stripe's public documentation with their sources. `products` and `topics` are enums from the knowledge graph — the model does the entity linking, the graph widens the search one hop, and dense + BM25 legs run with the same filter and are fused |
 
 Every call passes through the hooks: `turn_budget` (8 tool rounds per turn; the ninth
 is denied with feedback, the next request forces a text answer, and a model that still
 asks for tools is stopped), `tool_cache_lookup` (identical calls within a session are
 served from a TTL cache), `result_cap` (results over ~1.5K tokens are truncated at a
-boundary with a note), `tool_cache_store`. An existing `data/runtime.db` is upgraded in
-place on startup when the metrics table gains columns.
+boundary with a note), `tool_cache_store`, `source_extraction` (sources a search cited
+are collected on the turn and returned on `done`). An existing `data/runtime.db` is
+upgraded in place on startup when the metrics table gains columns.
+
+## Knowledge search
+
+Only documents whose header says `Access Level: public` are ever read — the three
+internal documents are not indexed, not embedded, not opened past their header
+([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)). Each
+document is chunked by heading (no framework), tagged with its knowledge-graph product
+and neighbours, and written to two Milvus Lite collections with identical rows: a dense
+one (OpenAI `text-embedding-3-small`, through the Provider seam) and a BM25 one Milvus
+computes from the text. A search runs both legs with the same scalar filter and fuses by
+reciprocal rank ([ADR 0004](docs/adr/0004-hybrid-retrieval-via-sibling-collection.md)).
+Rebuild with `python -m app.retrieval.ingest` — always a full rebuild, so the index never keeps
+chunks of documents that changed or disappeared. When the model names no entities, a short list of
+unambiguous product phrases links the question instead; everyday words that merely resemble a
+product name ("link", "connect", "platform") are deliberately not on it, because the fallback
+narrows the search and a false match would hide the right documents.
 
 ## Measured on the live model
 
@@ -182,6 +209,13 @@ place on startup when the metrics table gains columns.
 | Latency | 14.5 s | 18.3 s |
 
 Before tools (turn 2 of a plain two-turn chat): 1,024 of 1,169 prompt tokens from cache, ~3 s.
+
+With knowledge search, on "which local payment methods can Checkout show customers in
+Germany and the Netherlands, and does that work with Billing?": the model loaded
+`payments` and `billing`, ran four rounds of `search_knowledge` narrowing to recurring
+support for iDEAL/Giropay, and answered with five cited sources — 36K prompt tokens
+(77% from cache), 43 s. That multi-round pattern is what the `research` sub-agent (#7)
+moves out of the main conversation.
 
 ## Documents
 

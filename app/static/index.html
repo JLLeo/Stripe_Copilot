@@ -58,6 +58,9 @@
   .act .args { color: var(--text); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52ch; }
   .act .r { flex: 0 0 auto; }
   .act .r.cached::after { content: " · cached"; color: var(--ok); }
+  .sources { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .sources a { font-size: 12px; color: var(--accent-2); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+  .sources a:hover { border-color: var(--accent-2); }
   .status { color: var(--muted); font-size: 13px; font-style: italic; }
   .status::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent-2); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .2; } }
@@ -134,7 +137,7 @@
     document.querySelector(".empty")?.remove();
     const wrap = document.createElement("div");
     wrap.className = "msg " + role;
-    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="meta"></div></div>`;
+    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="sources"></div><div class="meta"></div></div>`;
     wrap.querySelector(".bubble").textContent = text || "";
     thread.appendChild(wrap);
     scroll();
@@ -163,6 +166,12 @@
   }
 
   function finish(wrap, done) {
+    const sources = wrap.querySelector(".sources");
+    for (const s of done.sources || []) {
+      const a = document.createElement("a");
+      a.href = s.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = s.title || s.url;
+      sources.appendChild(a);
+    }
     const meta = wrap.querySelector(".meta");
     const u = done.usage || {};
     const cache = (u.cache_hit_tokens + u.cache_miss_tokens) ? Math.round(100 * u.cache_hit_tokens / (u.cache_hit_tokens + u.cache_miss_tokens)) + "% cache hit" : "";

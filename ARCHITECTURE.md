@@ -128,6 +128,7 @@ Results are compact JSON — they live in every later request of the session.
 | `get_my_profile()` | seed `customers` + `customer_product_usage` | no parameters; reads the session's bound customer, so another customer cannot be named |
 | `list_products(group?)` | seed `stripe_products` | name, group, one-line description |
 | `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing |
+| `search_knowledge(question, products[], topics[])` | the knowledge index (below) | `products` and `topics` are enums from the graph; results carry passages and sources; `meta.sources` feeds `source_extraction` |
 
 ### Hooks and guardrails — `hooks.py`, `guardrails.py`
 
@@ -138,7 +139,9 @@ Results are compact JSON — they live in every later request of the session.
 - **PreToolUse** hooks return `Allow`, `Deny(feedback)` or `Replace(result)`; the first
   deny or replace wins. A deny becomes the tool message `Blocked by <hook>: <feedback>`
   and the loop continues, so the model reads why and adjusts.
-- **PostToolUse** hooks may return a modified `ToolResult`.
+- **PostToolUse** hooks may return a modified `ToolResult`. They run on served (cached)
+  results as well as fresh ones, so `source_extraction` sees every search the model
+  relied on; `tool_cache_store` skips results that came from the cache.
 - `Stop` and `SessionEnd` gain dispatchers with *#5* and *#10*.
 
 | Guardrail | Hook | Rule |
@@ -147,6 +150,7 @@ Results are compact JSON — they live in every later request of the session.
 | `tool_cache_lookup` | PreToolUse | an identical call (tool + arguments) within the session is replaced by the cached result (TTL 15 min, 50 entries per session, 200 sessions) |
 | `result_cap` | PostToolUse | results over 6,000 characters (~1.5K tokens) are cut at a JSON element, sentence or line boundary with a `[truncated: showing N of M characters]` note |
 | `tool_cache_store` | PostToolUse | successful cacheable results enter the cache |
+| `source_extraction` | PostToolUse | sources a tool cites (`meta.sources`) are collected on the turn, de-duplicated, and returned in `done.sources` |
 
 Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `hard_stop`.
 
@@ -182,6 +186,8 @@ its own on `app.state.harness` first.
 | `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
 | `GET /api/customers` | sign-in selector |
 | `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn; `tool_usage()` — calls per tool |
+
+`done` carries `sources` — the `(title, url)` pairs collected by `source_extraction` — and the UI renders them as links under the reply; `/sales-agent/chat` returns them in `ChatResponse.sources`.
 | `GET /` | the chat UI |
 
 The UI (`static/index.html`) is a single page: a sign-in-as-customer selector, a
@@ -217,21 +223,71 @@ with a rollback journal so no `-wal`/`-shm` sidecars appear beside a tracked fil
 `SEED_DB_PATH` / `RUNTIME_DB_PATH` override the locations; the test suite points the
 runtime at a temp file for the whole run.
 
-### Knowledge graph — `knowledge_base/knowledge_graph.yaml` (retained, *rewired in #6*)
+## Knowledge retrieval — `app/retrieval/`
 
-80 nodes, 150 edges, loaded into a `networkx.DiGraph` at first use: products, payment
-methods, compliance topics, geographies, customer types, and the relationships between
-them (`integrates_with`, `supports_method`, `suitable_for`, `complies_with`, …).
-`kg_retriever.py` links a query to entities and expands one hop to build a scalar
-filter; in the new design the model does the linking and the graph does the expansion
-([ADR 0004](docs/adr/0004-hybrid-retrieval-via-sibling-collection.md)).
+### Knowledge graph — `graph.py`, `knowledge_base/knowledge_graph.yaml`
 
-### Milvus — `milvus.db` (Milvus Lite; retained, *rewired in #6*)
+80 nodes, 150 edges in a `networkx.DiGraph`: 16 products, 24 payment methods, 8
+compliance standards, 7 geographies, 5 customer types, plus product lines and the old
+routing scenarios (kept in the file, unused). Two questions are asked of it:
+`related_products(p)` — products one hop away along `integrates_with` / `cross_sell`,
+either direction — and `products_for(topic)` — products that point at a compliance
+standard (`complies_with`), payment method (`supports_method`), geography
+(`available_in`) or customer type (`suitable_for`).
 
-Collection `stripe_sales_knowledge`, 278 chunks, 1536-dim, COSINE. Ingestion enriches
-each chunk with KG metadata (`related_products`, `supports_methods`, `complies_with`)
-and an `access_level`. #6 rebuilds ingestion to index public chunks only, adds the
-BM25 sibling collection, and moves embeddings onto the Provider seam.
+### Entity Linking and Graph Expansion — `linking.py`
+
+The `search_knowledge` tool's `products` and `topics` parameters are enums built from
+the graph (`vocabulary()`), so the model can only name entities that exist — that is
+the linking step, done by the model. `link()` validates the names, then expands: linked
+products plus their one-hop neighbours plus the products each topic points at. When the
+model names nothing, `keyword_products()` links products by name and alias from the
+question text; the result is marked `fallback` and is never preferred over the model's
+own linking ([ADR 0001](docs/adr/0001-model-decides-guardrails-constrain.md)). The
+fallback phrase list holds only unambiguous product names — "link", "connect",
+"platform", "elements" are absent on purpose, because the fallback narrows the filter
+and a false match would exclude the right documents. `filter_expr()` renders the
+expanded set as `product in [...] and access_level == "public"` — the public clause is
+belt and braces, since only public chunks exist.
+
+### Documents and chunks — `documents.py`, `chunking.py`
+
+`load_public_documents()` reads every `knowledge_base/**/*.md`, keeps those whose header
+says `Access Level: public` (18 of 21), maps each to its graph product (`Product:`
+header; pricing and security overviews file under `payments`), and records the
+product's neighbours, payment methods and compliance standards as metadata. It is the
+single implementation of the public-only rule: the index and `get_pricing` both read
+through it, and the three Internal Knowledge documents have nothing but their header
+checked ([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)).
+
+`chunk_markdown()` drops the header block, splits the body at `##` / `###` headings,
+packs paragraphs, bullets and table rows greedily to ~600 characters, and prefixes each
+chunk with `<title> — <heading path>` so a passage read alone still says what it is
+about. 18 documents become 177 chunks (average 435 characters). No framework.
+
+### The index — `index.py`, `ingest.py`
+
+Two Milvus Lite collections with identical rows and metadata: `knowledge_dense`
+(embedding from `Provider.embed`, COSINE, AUTOINDEX) and `knowledge_sparse` (a BM25
+sparse vector Milvus computes from `text`, `SPARSE_INVERTED_INDEX`). They are siblings
+because Milvus Lite on Windows fails on a second vector index in one collection
+([ADR 0004](docs/adr/0004-hybrid-retrieval-via-sibling-collection.md)). `build_index()`
+drops every existing collection when rebuilding (the previous single collection held
+internal chunks), embeds in batches through the Provider, and upserts both. A first
+search checks that the provider's vector size matches the one the index was built with
+and fails with a clear message otherwise.
+
+`KnowledgeIndex.search(question, products, topics, top_k=6)` links and expands, embeds
+the question, runs the dense and BM25 legs with the same filter and `3 × top_k`
+candidates each, and fuses by reciprocal rank (`1 / (60 + rank)` summed over legs). Each
+hit records the rank it had in each leg; `sources` de-duplicates `(title, url)` in hit
+order. Because embeddings come through the Provider seam, the test suite builds a real
+index from a fixture knowledge base with the fake embedder — whose vectors are
+bag-of-words hashes, so texts sharing words are near each other — and asserts on both
+legs, fusion, filtering and the absence of the fixture's internal document.
+
+`python -m app.retrieval.ingest` rebuilds `milvus.db/` from scratch with the production
+provider (OpenAI embeddings); the directory is tracked so a clean checkout runs.
 
 ## Observability — `app/metrics.py`
 
@@ -247,7 +303,7 @@ accident and this is where a break shows first.
 
 ## Testing
 
-92 tests, no network, one temp runtime database per run, ~3 s. The app under test
+70 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~12 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -263,7 +319,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 | Ticket | Adds |
 |---|---|
 | #5 | `ask_customer`, `Stop` guardrails (`anti_placeholder`, `internal_canary`) |
-| #6 | public-only ingestion, hybrid dense + BM25 search, model-driven entity linking, LangChain removed |
 | #7 | the `research` sub-agent |
 | #8 | Handoff with customer confirmation, the seven Teams, policy skills |
 | #9 | prospect discovery and lead capture |

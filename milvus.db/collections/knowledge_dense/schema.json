@@ -1,5 +1,5 @@
 {
-  "collection_name": "stripe_sales_knowledge",
+  "collection_name": "knowledge_dense",
   "enable_dynamic_field": false,
   "fields": [
     {
@@ -10,7 +10,7 @@
       "element_type": null,
       "is_primary": true,
       "max_capacity": null,
-      "max_length": 128,
+      "max_length": 64,
       "name": "id",
       "nullable": false
     },
@@ -46,7 +46,7 @@
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 128,
+      "max_length": 1024,
       "name": "product",
       "nullable": false
     },
@@ -58,7 +58,7 @@
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 64,
+      "max_length": 1024,
       "name": "product_line",
       "nullable": false
     },
@@ -70,7 +70,7 @@
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 128,
+      "max_length": 1024,
       "name": "doc_id",
       "nullable": false
     },
@@ -82,8 +82,20 @@
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 512,
-      "name": "source_file",
+      "max_length": 1024,
+      "name": "title",
+      "nullable": false
+    },
+    {
+      "auto_id": false,
+      "default_value": null,
+      "dim": null,
+      "dtype": "varchar",
+      "element_type": null,
+      "is_primary": false,
+      "max_capacity": null,
+      "max_length": 1024,
+      "name": "heading",
       "nullable": false
     },
     {
@@ -106,56 +118,8 @@
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 32,
-      "name": "source_type",
-      "nullable": false
-    },
-    {
-      "auto_id": false,
-      "default_value": null,
-      "dim": null,
-      "dtype": "varchar",
-      "element_type": null,
-      "is_primary": false,
-      "max_capacity": null,
-      "max_length": 32,
+      "max_length": 1024,
       "name": "access_level",
-      "nullable": false
-    },
-    {
-      "auto_id": false,
-      "default_value": null,
-      "dim": null,
-      "dtype": "varchar",
-      "element_type": null,
-      "is_primary": false,
-      "max_capacity": null,
-      "max_length": 256,
-      "name": "sales_scenario",
-      "nullable": false
-    },
-    {
-      "auto_id": false,
-      "default_value": null,
-      "dim": null,
-      "dtype": "varchar",
-      "element_type": null,
-      "is_primary": false,
-      "max_capacity": null,
-      "max_length": 256,
-      "name": "topic",
-      "nullable": false
-    },
-    {
-      "auto_id": false,
-      "default_value": null,
-      "dim": null,
-      "dtype": "int64",
-      "element_type": null,
-      "is_primary": false,
-      "max_capacity": null,
-      "max_length": null,
-      "name": "chunk_index",
       "nullable": false
     },
     {
@@ -190,7 +154,7 @@
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 512,
+      "max_length": 1024,
       "name": "complies_with",
       "nullable": false
     },
@@ -198,12 +162,12 @@
       "auto_id": false,
       "default_value": null,
       "dim": null,
-      "dtype": "varchar",
+      "dtype": "int64",
       "element_type": null,
       "is_primary": false,
       "max_capacity": null,
-      "max_length": 1024,
-      "name": "kg_scenarios",
+      "max_length": null,
+      "name": "chunk_index",
       "nullable": false
     }
   ],

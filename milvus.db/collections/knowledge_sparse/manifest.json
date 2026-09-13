@@ -1,0 +1,22 @@
+{
+  "active_wal_number": null,
+  "current_seq": 0,
+  "index_specs": {
+    "sparse": {
+      "build_params": {},
+      "field_name": "sparse",
+      "index_type": "SPARSE_INVERTED_INDEX",
+      "metric_type": "BM25",
+      "search_params": {}
+    }
+  },
+  "manifest_format_version": 2,
+  "partitions": {
+    "_default": {
+      "data_files": [],
+      "delta_files": []
+    }
+  },
+  "schema_version": 1,
+  "version": 1
+}

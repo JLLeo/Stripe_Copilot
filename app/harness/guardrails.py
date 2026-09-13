@@ -124,7 +124,7 @@ def make_tool_cache_hooks(cache: ToolCache):
         return Replace(ToolResult(content=hit.content, is_error=hit.is_error, meta={**hit.meta, "cached": True}))
 
     def tool_cache_store(ctx: ToolUseContext, result: ToolResult) -> None:
-        if ctx.tool.cacheable and not result.is_error:
+        if ctx.tool.cacheable and not result.is_error and not result.meta.get("cached"):
             cache.put(ctx.turn.session_id, ToolCache.key(ctx.tool.name, ctx.arguments), result)
         return None
 
