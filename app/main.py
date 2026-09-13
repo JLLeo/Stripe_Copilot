@@ -18,10 +18,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.database import get_connection, init_db
-from app.harness.core import Harness, SessionCustomerMismatch, TurnEvent, UnknownCustomer
+from app import database
+from app.harness.core import Harness, NothingPending, SessionCustomerMismatch, TurnEvent, UnknownCustomer
 from app.harness.deepseek import DeepSeekProvider
 from app.metrics import init_metrics, summary, tool_usage
-from app.schemas import ChatRequest, ChatResponse
+from app.schemas import ChatRequest, ChatResponse, ConfirmHandoffRequest
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -113,6 +114,28 @@ def chat_stream(body: ChatRequest, request: Request):
     events = _run(request, body)
     return StreamingResponse(
         (_sse(event) for event in events),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/sales-agent/confirm-handoff")
+def confirm_handoff(body: ConfirmHandoffRequest, request: Request):
+    """The customer answered the pending handoff; the agent picks the conversation up from there (SSE)."""
+    pending = database.pending_handoff(body.session_id)
+    if pending is None:
+        raise HTTPException(status_code=404, detail="no handoff is waiting for confirmation in this session")
+    if body.handoff_id is not None and body.handoff_id != pending["id"]:
+        raise HTTPException(status_code=409, detail="that proposal is no longer the one waiting; reload the conversation")
+    events = _harness(request).resume_turn(body.session_id, body.accept)
+    try:
+        first = next(events)
+    except NothingPending as exc:
+        raise HTTPException(status_code=404, detail="no handoff is waiting for confirmation in this session") from exc
+    except StopIteration:
+        return StreamingResponse(iter(()), media_type="text/event-stream")
+    return StreamingResponse(
+        (_sse(event) for event in (first, *events)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

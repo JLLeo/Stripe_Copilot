@@ -6,7 +6,7 @@ Seed database   (tracked, read-only)   data/seed.db
     Rebuild from data.xlsx with:  python scripts/build_seed_db.py
 
 Runtime database (ignored, read-write)  data/runtime.db
-    sessions, messages, turn_metrics — everything the agent writes.
+    sessions, messages, handoffs, turn_metrics — everything the agent writes.
     Created on first start.
 
 Callers never learn which table lives where: the runtime database is the main
@@ -44,6 +44,7 @@ SEED_TABLES: tuple[str, ...] = (
 RUNTIME_TABLES: tuple[str, ...] = (
     "sessions",
     "messages",
+    "handoffs",
     "turn_metrics",  # DDL lives in app.metrics.init_metrics; ownership is recorded here.
 )
 
@@ -143,6 +144,22 @@ def init_db() -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)")
+    # A Handoff row is created when the model proposes one and resolved when the customer answers.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS handoffs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id    TEXT NOT NULL REFERENCES sessions(session_id),
+            customer_id   TEXT,
+            tool_call_id  TEXT NOT NULL,
+            team          TEXT NOT NULL,
+            reason        TEXT NOT NULL,
+            evidence      TEXT NOT NULL,
+            status        TEXT NOT NULL,  -- pending | confirmed | declined
+            created_at    TEXT NOT NULL,
+            resolved_at   TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(session_id, status)")
     conn.commit()
 
 
@@ -223,6 +240,68 @@ def append_messages(session_id: str, messages: list[dict[str, Any]]) -> None:
         ],
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Handoffs
+# ---------------------------------------------------------------------------
+HANDOFF_PENDING = "pending"  # proposed; the customer has not answered
+HANDOFF_CONFIRMED = "confirmed"  # the customer said yes; a team takes over
+HANDOFF_DECLINED = "declined"  # the customer said no, or moved on; nobody is contacted
+HANDOFF_ABANDONED = "abandoned"  # proposed, but the turn never reached the customer (disconnect); nobody is contacted
+
+
+def create_pending_handoff(
+    *, session_id: str, customer_id: str | None, tool_call_id: str, team: str, reason: str, evidence: str
+) -> int:
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO handoffs (session_id, customer_id, tool_call_id, team, reason, evidence, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (session_id, customer_id, tool_call_id, team, reason, evidence, HANDOFF_PENDING, _now()),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def pending_handoff(session_id: str) -> dict[str, Any] | None:
+    row = get_connection().execute(
+        "SELECT * FROM handoffs WHERE session_id = ? AND status = ? ORDER BY id DESC LIMIT 1",
+        (session_id, HANDOFF_PENDING),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def resolve_handoff(handoff_id: int, status: str) -> bool:
+    """Move a pending handoff to `status`. False if it was no longer pending — someone else resolved it first."""
+    conn = get_connection()
+    cur = conn.execute(
+        "UPDATE handoffs SET status = ?, resolved_at = ? WHERE id = ? AND status = ?",
+        (status, _now(), handoff_id, HANDOFF_PENDING),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def count_handoffs(since: str, status: str = HANDOFF_CONFIRMED) -> int:
+    return get_connection().execute(
+        "SELECT COUNT(*) FROM handoffs WHERE status = ? AND resolved_at >= ?", (status, since)
+    ).fetchone()[0]
+
+
+def dangling_tool_call_ids(working_memory: list[dict[str, Any]]) -> list[str]:
+    """Tool calls in the last assistant message that have no tool result after it — an invalid transcript."""
+    for i in range(len(working_memory) - 1, -1, -1):
+        msg = working_memory[i]
+        if msg["role"] == "assistant":
+            wanted = [c["id"] for c in msg.get("tool_calls") or []]
+            answered = {m.get("tool_call_id") for m in working_memory[i + 1:] if m["role"] == "tool"}
+            return [c for c in wanted if c not in answered]
+        if msg["role"] == "user":
+            return []
+    return []
 
 
 # ---------------------------------------------------------------------------

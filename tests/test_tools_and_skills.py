@@ -24,6 +24,7 @@ from tests.conftest import sse_events as _events
 pytestmark = pytest.mark.unit
 
 PRODUCT_SKILLS = {"payments", "billing", "connect", "tax", "fraud_protection", "terminal", "data"}
+POLICY_SKILLS = {"pricing_conversation", "security_compliance", "objection_handling"}
 
 
 def calls(*specs: tuple[str, dict]) -> Completion:
@@ -57,7 +58,7 @@ def test_static_prompt_lists_skill_descriptions_but_never_bodies(client, provide
 
     static = provider.requests[0].messages[0]["content"]
     skills = load_skills(HarnessConfig().skills_dir)
-    assert set(skills) == PRODUCT_SKILLS
+    assert set(skills) == PRODUCT_SKILLS | POLICY_SKILLS
     for skill in skills.values():
         assert skill.description in static
         # A distinctive line from the body must not be in the prompt.
@@ -114,9 +115,9 @@ def test_skills_carry_no_tool_allowlist_and_definitions_are_stable(client, provi
     a, b = provider.requests
     assert json.dumps(a.tools, sort_keys=True) == json.dumps(b.tools, sort_keys=True)
     names = [t["function"]["name"] for t in a.tools]
-    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research"]
+    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff"]
     skill_tool = a.tools[0]["function"]
-    assert sorted(skill_tool["parameters"]["properties"]["name"]["enum"]) == sorted(PRODUCT_SKILLS)
+    assert sorted(skill_tool["parameters"]["properties"]["name"]["enum"]) == sorted(PRODUCT_SKILLS | POLICY_SKILLS)
     assert "allowed" not in json.dumps(a.tools)
 
 
@@ -329,6 +330,7 @@ def test_metrics_table_from_an_older_runtime_database_is_upgraded_in_place(tmp_p
     conn.execute("INSERT INTO turn_metrics (turn_id, session_id, created_at) VALUES ('t0', 's0', '2099-01-01T00:00:00+00:00')")
     conn.commit()
 
+    database.init_db()  # startup order: tables first, then metrics
     init_metrics()
 
     columns = {row[1] for row in conn.execute("PRAGMA table_info(turn_metrics)")}

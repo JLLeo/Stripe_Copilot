@@ -63,6 +63,11 @@
   .sources { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
   .sources a { font-size: 12px; color: var(--accent-2); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
   .sources a:hover { border-color: var(--accent-2); }
+  .handoff { margin-top: 10px; border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; background: rgba(99,91,255,.08); }
+  .handoff .t { font-weight: 600; margin-bottom: 4px; }
+  .handoff .d { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .handoff .btns { display: flex; gap: 8px; }
+  .handoff.resolved { opacity: .6; }
   .status { color: var(--muted); font-size: 13px; font-style: italic; }
   .status::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent-2); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .2; } }
@@ -139,7 +144,7 @@
     document.querySelector(".empty")?.remove();
     const wrap = document.createElement("div");
     wrap.className = "msg " + role;
-    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="sources"></div><div class="meta"></div></div>`;
+    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="handoff-slot"></div><div class="sources"></div><div class="meta"></div></div>`;
     wrap.querySelector(".bubble").textContent = text || "";
     thread.appendChild(wrap);
     scroll();
@@ -182,23 +187,78 @@
       .filter(Boolean).map((t) => `<span>${escapeHtml(t)}</span>`).join("");
   }
 
+  // --- handoff confirmation ----------------------------------------------
+  function offerHandoff(wrap, pending) {
+    const slot = wrap.querySelector(".handoff-slot");
+    const card = document.createElement("div");
+    card.className = "handoff";
+    card.innerHTML = `<div class="t"></div><div class="d"></div><div class="btns"><button class="primary" data-accept="true">Yes, connect me</button><button data-accept="false">No, keep going</button></div>`;
+    card.querySelector(".t").textContent = `Bring in ${pending.team}?`;
+    card.querySelector(".d").textContent = pending.handles ? `${pending.team} handles ${pending.handles}.` : "";
+    for (const b of card.querySelectorAll("button")) {
+      b.addEventListener("click", async () => {
+        if (state.busy) return;
+        const accept = b.dataset.accept === "true";
+        for (const x of card.querySelectorAll("button")) x.disabled = true;
+        const ok = await resumeAfterHandoff(accept, pending.handoff_id);
+        if (ok) {
+          card.classList.add("resolved");
+          card.querySelector(".d").textContent = accept ? "Confirmed — connecting you." : "Declined — continuing here.";
+        } else {
+          for (const x of card.querySelectorAll("button")) x.disabled = false;
+        }
+      });
+    }
+    slot.appendChild(card);
+    scroll();
+  }
+
+  async function resumeAfterHandoff(accept, handoffId) {
+    return withReply((reply) => fetch("/sales-agent/confirm-handoff", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.sessionId, accept, handoff_id: handoffId }),
+    }).then((res) => streamInto(res, reply)));
+  }
+
+  // Run one request that streams into a fresh agent bubble; returns true when the stream completed.
+  async function withReply(run) {
+    state.busy = true; send.disabled = true;
+    const reply = addMessage("agent", "");
+    setStatus(reply, "thinking");
+    try {
+      await run(reply);
+      return true;
+    } catch (err) {
+      const bubble = reply.querySelector(".bubble");
+      bubble.textContent = "I couldn't reach the agent. Please check the server and try again.";
+      bubble.classList.add("error"); setStatus(reply, "");
+      return false;
+    } finally {
+      state.busy = false; send.disabled = false; input.focus();
+    }
+  }
+
+  async function streamInto(res, reply) {
+    if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+    await consumeStream(res, reply);
+  }
+
   // --- talking to the agent ------------------------------------------------
   async function ask(text) {
     if (state.busy || !text.trim()) return;
-    state.busy = true; send.disabled = true; input.value = ""; autosize();
+    input.value = ""; autosize();
     addMessage("customer", text);
-    const reply = addMessage("agent", "");
+    await withReply((reply) => fetch("/sales-agent/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.sessionId, customer_id: state.customerId, message: text }),
+    }).then((res) => streamInto(res, reply)));
+  }
+
+  async function consumeStream(res, reply) {
     const bubble = reply.querySelector(".bubble");
     const pending = {};
-    setStatus(reply, "thinking");
-
-    try {
-      const res = await fetch("/sales-agent/stream", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: state.sessionId, customer_id: state.customerId, message: text }),
-      });
-      if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
-      const reader = res.body.getReader(), decoder = new TextDecoder();
+    const reader = res.body.getReader(), decoder = new TextDecoder();
+    {
       let buffer = "";
       for (;;) {
         const { value, done } = await reader.read();
@@ -221,15 +281,11 @@
           else if (event === "subagent_tool_call") { addActivity(reply, "sub", `${data.name} › ${data.tool}`, shortArgs(data.arguments)); }
           else if (event === "subagent_finished") { addActivity(reply, "sub", data.name, `${data.tool_calls} tool call${data.tool_calls === 1 ? "" : "s"}`, { text: data.gave_up ? "no brief (budget reached)" : data.stopped_by_cap ? "brief (budget reached)" : "brief" }); }
           else if (event === "text_delta") { if (!bubble.textContent) setStatus(reply, ""); bubble.textContent += data.text || ""; scroll(); }
-          else if (event === "done") finish(reply, data);
+          else if (event === "handoff_pending") { setStatus(reply, ""); }
+          else if (event === "done") { if (!bubble.textContent && data.reply) bubble.textContent = data.reply; finish(reply, data); if (data.pending_handoff) offerHandoff(reply, data.pending_handoff); }
           else if (event === "error") { bubble.textContent = data.reply || "Something went wrong."; bubble.classList.add("error"); setStatus(reply, ""); }
         }
       }
-    } catch (err) {
-      bubble.textContent = "I couldn't reach the agent. Please check the server and try again.";
-      bubble.classList.add("error"); setStatus(reply, "");
-    } finally {
-      state.busy = false; send.disabled = false; input.focus();
     }
   }
 

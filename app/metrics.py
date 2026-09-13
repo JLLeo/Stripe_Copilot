@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.database import get_connection
+from app.database import count_handoffs, get_connection
 
 log = logging.getLogger(__name__)
 
@@ -179,6 +179,8 @@ def summary(days: int = 7) -> dict[str, Any]:
         "avg_provider_calls": round(row["avg_provider_calls"] or 0.0, 2),
         "subagent_calls": row["subagent_calls"] or 0,
         "subagent_tokens": row["subagent_tokens"] or 0,
+        "handoffs_confirmed": count_handoffs(since, "confirmed"),
+        "handoffs_declined": count_handoffs(since, "declined"),
     }
 
 

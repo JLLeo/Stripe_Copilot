@@ -19,4 +19,11 @@ class ChatResponse(BaseModel):
     latency_ms: int | None = None
     tool_rounds: int | None = None
     sources: list[dict[str, str]] = Field(default_factory=list)
+    pending_handoff: dict | None = None  # set when the turn paused for the customer's confirmation
     error: str | None = None
+
+
+class ConfirmHandoffRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    accept: bool
+    handoff_id: int | None = None  # the proposal the customer saw; refused if another one is pending now

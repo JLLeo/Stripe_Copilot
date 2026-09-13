@@ -40,8 +40,8 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
 
 `Harness.run_turn(session_id, customer_id, message)` is a generator of `TurnEvent`s
 (`thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`,
-`subagent_started`, `subagent_tool_call`, `subagent_finished`, `text_delta`, `done`,
-`error`). The transport layer forwards them as Server-Sent Events or, for the
+`subagent_started`, `subagent_tool_call`, `subagent_finished`, `handoff_pending`,
+`text_delta`, `done`, `error`). The transport layer forwards them as Server-Sent Events or, for the
 synchronous endpoint, keeps only the last one.
 
 1. **Session binding.** An unseen `session_id` triggers **SessionStart**: the Customer
@@ -55,13 +55,16 @@ synchronous endpoint, keeps only the last one.
    first reasoning delta is announced once as `thinking`, and the final `Completed`
    event carries usage and any tool calls.
 4. **Tool rounds.** While the reply carries tool calls, each call goes through the
-   `PreToolUse` hooks (allow, deny with feedback, or replace with a cached result), the
-   tool runs, the `PostToolUse` hooks may rewrite the result, and a `tool` message is
-   appended; then the model is called again with everything so far. A round is one
-   model response with tool calls; several calls in one response run in order and all
-   their results go back together. Unknown tools, malformed arguments, missing
+   `PreToolUse` hooks (allow, deny with feedback, replace with a cached result, or
+   pause), the tool runs, the `PostToolUse` hooks may rewrite the result, and a `tool`
+   message is appended; then the model is called again with everything so far. A round
+   is one model response with tool calls; several calls in one response run in order and
+   all their results go back together. Unknown tools, malformed arguments, missing
    required arguments and tool exceptions all come back to the model as feedback in
-   the tool message — the customer never sees them.
+   the tool message — the customer never sees them. A **pause** ends the turn at that
+   call: the remaining calls of the round get a "not run" result, the messages so far are
+   appended, and `done` carries the question for the customer; the paused call's result
+   arrives with their answer (see Handoff).
 5. **Working memory.** The customer message and every assistant and tool message of
    the turn (assistant rows with their `reasoning_content`, which DeepSeek requires
    back whenever `tools` are present) are appended as `messages` rows. Nothing is
@@ -132,6 +135,7 @@ Results are compact JSON — they live in every later request of the session.
 | `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing |
 | `search_knowledge(question, products[], topics[])` | the knowledge index (below) | `products` and `topics` are enums from the graph; results carry passages and sources; `meta.sources` feeds `source_extraction`. Its description says: use this first; hand multi-product, comparative or thin results to `research` |
 | `research(question)` | a Sub-agent (below) over `search_knowledge` | returns `{brief, sources, tool_calls, stopped_by_cap, gave_up}`; the documents the brief cites in `[Title]` form are its sources (a brief that cites nothing keeps everything it read); `meta.subagent` carries its metering |
+| `request_handoff(team, reason, evidence)` | `handoffs` (runtime) | never runs inside a turn: `handoff_confirmation` pauses first, and the customer's answer produces its result (see Handoff) |
 
 ### Sub-agents — `subagent.py`, `app/tools/research.py`
 
@@ -170,9 +174,10 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
 `Stop`, `SessionEnd` — and `HookRegistry` keeps hooks per event in registration order.
 
 - **SessionStart** hooks return text for the customer block.
-- **PreToolUse** hooks return `Allow`, `Deny(feedback)` or `Replace(result)`; the first
-  deny or replace wins. A deny becomes the tool message `Blocked by <hook>: <feedback>`
-  and the loop continues, so the model reads why and adjusts.
+- **PreToolUse** hooks return `Allow`, `Deny(feedback)`, `Replace(result)` or
+  `Pause(event, data, reply)`; the first deny, replace or pause wins. A deny becomes the
+  tool message `Blocked by <hook>: <feedback>` and the loop continues, so the model reads
+  why and adjusts. A pause ends the turn and asks the customer.
 - **PostToolUse** hooks may return a modified `ToolResult`. They run on served (cached)
   results as well as fresh ones, so `source_extraction` sees every search the model
   relied on; `tool_cache_store` skips results that came from the cache.
@@ -185,8 +190,51 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
 | `result_cap` | PostToolUse | results over 6,000 characters (~1.5K tokens) are cut at a JSON element, sentence or line boundary with a `[truncated: showing N of M characters]` note |
 | `tool_cache_store` | PostToolUse | successful cacheable results enter the cache |
 | `source_extraction` | PostToolUse | sources a tool cites (`meta.sources`) are collected on the turn, de-duplicated, and returned in `done.sources` |
+| `handoff_validity` | PreToolUse | `request_handoff` with an unknown team, empty evidence, or evidence that matches nothing the customer said (a passage, or ≥60% of its whole words) and names no actual profile value is denied with feedback — field names alone never count |
+| `enterprise_volume` | PreToolUse | a customer whose profile shows more than $10M annual payment volume can only be handed to Enterprise Sales; anything else is denied with feedback naming the rule |
+| `handoff_confirmation` | PreToolUse | every valid `request_handoff` creates a pending `handoffs` row and pauses the turn with `handoff_pending` |
 
-Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `hard_stop`.
+Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `paused`, `hard_stop`.
+
+### Handoff — `app/tools/handoff.py`
+
+The customer-facing form of Claude Code's permission prompt. Seven canonical Teams
+(`Enterprise Sales`, `Deal Desk / Pricing`, `Solutions Engineering`, `Security &
+Compliance`, `Tax Specialist`, `Risk / Fraud`, `Sales Representative`) with a
+one-line remit each, rendered into the `request_handoff` description; the policy
+register's own team names map onto them (`team_for_policy`), and every policy line in
+the static prompt ends with "→ hand off to <Team>", so the model learns which team from the
+same text that states the rule.
+
+The flow: the model calls `request_handoff(team, reason, evidence)` → `handoff_validity`
+and `enterprise_volume` may deny with feedback → `handoff_confirmation` writes a
+`pending` row and returns `Pause`. The harness emits `handoff_pending`, stops
+dispatching, appends the customer's message and the assistant's tool-call message to
+working memory, and ends the turn with a reply that asks the customer — the model's own
+words when it wrote any alongside the tool call (so the question follows the customer's
+language), otherwise a fixed sentence built from the team and reason. The paused call has
+no result yet — exactly as Claude Code holds a tool call until permission is given.
+`POST /sales-agent/confirm-handoff {session_id, accept, handoff_id?}` resolves the row
+(`confirmed` / `declined`) with a conditional update, so two answers cannot both win;
+appends the tool result (`{status, team, next}`) to working memory **before** calling the
+model, so a provider failure can never leave a dangling tool call; then runs the loop
+without a new customer message, so the follow-up comes from the tool result alone. A
+`handoff_id` that is no longer the pending one is refused (409).
+
+Before any new turn, `_settled_working_memory` makes the transcript valid: a handoff
+still pending is resolved as `declined` and its result appended (the customer moved on);
+a pending row whose tool call never reached working memory — the customer disconnected
+while the question was on its way — is marked `abandoned`; any other tool call left
+without a result gets a "not run" one. Only a confirmation brings a team in; declined and
+abandoned rows are bookkeeping and contact nobody.
+
+The three policy skills (`pricing_conversation`, `security_compliance`,
+`objection_handling`) are the customer-facing translation of the three Internal
+Knowledge documents: behaviour rules, the questions to establish first, and the
+documents' approved client-facing wording — no thresholds, discount ranges, approval
+workflows, competitor tactics or segmentation tables
+([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)). A test
+loads them and asserts the prompt stays free of internal markers.
 
 ### The Provider seam — `provider.py`
 
@@ -246,6 +294,7 @@ gitignored and created on first start.
 | seed | `sales_policy_updates` (20) | the policy register rendered into the static prompt |
 | runtime | `sessions` | session → customer binding and the frozen customer block |
 | runtime | `messages` | working memory, one row per message, insert-only |
+| runtime | `handoffs` | one row per proposed handoff: session, customer, team, reason, evidence, `pending` → `confirmed` / `declined` / `abandoned` |
 | runtime | `turn_metrics` | one row per turn |
 
 `get_connection()` opens the runtime file as the main database (`WAL`,
@@ -330,14 +379,14 @@ older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the sche
 `runtime.db` from an earlier version keeps working. `summary(days)` returns turn count, error count,
 average latency, average prompt / completion / reasoning tokens, total cache hit and
 miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits,
-provider calls per turn, and sub-agent delegations and tokens; `tool_usage(days)` counts
-calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
+provider calls per turn, sub-agent delegations and tokens, and handoffs confirmed and
+declined; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
 first-class number because the prefix discipline in ADR 0005 is easy to break by
 accident and this is where a break shows first.
 
 ## Testing
 
-83 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~13 s. The app under test
+104 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~17 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -353,7 +402,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 | Ticket | Adds |
 |---|---|
 | #5 | `ask_customer`, `Stop` guardrails (`anti_placeholder`, `internal_canary`) |
-| #8 | Handoff with customer confirmation, the seven Teams, policy skills |
 | #9 | prospect discovery and lead capture |
 | #10 | Customer Memory and Reflection |
 | #11 | attachments, tool-result clearing, compaction with hysteresis |

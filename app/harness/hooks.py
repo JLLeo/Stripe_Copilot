@@ -8,7 +8,8 @@ Claude Code's:
     SESSION_START   a session's first turn: hooks return context to add to the
                     customer block (profile, memory)
     PRE_TOOL_USE    before a tool runs: Allow, Deny (with feedback the model
-                    reads), or Replace (serve a result without running the tool)
+                    reads), Replace (serve a result without running the tool), or
+                    Pause (stop the turn until the customer confirms)
     POST_TOOL_USE   after a tool returns: return a modified result, or None
     STOP            the model is done: validate the reply or send it back
     SESSION_END     the customer ends the conversation: reflection
@@ -50,6 +51,7 @@ class TurnState:
 
     session_id: str
     customer_id: str | None
+    customer_message: str = ""  # what the customer said this turn; guardrails may check evidence against it
     tool_rounds: int = 0  # model responses that carried tool calls, so far this turn
     tools_exhausted: bool = False  # set by turn_budget once it has denied a call this turn
     sources: list[dict[str, str]] = field(default_factory=list)  # collected by source_extraction for the reply
@@ -81,7 +83,16 @@ class Replace:
     result: ToolResult  # served instead of running the tool (e.g. a cache hit)
 
 
-PreToolUseOutcome = Allow | Deny | Replace
+@dataclass(frozen=True)
+class Pause:
+    """Stop the turn here; the tool runs (or not) once the customer has answered."""
+
+    event: str  # the SSE event that tells the client what is being asked, e.g. handoff_pending
+    data: dict[str, Any]
+    reply: str  # what the agent says to the customer while it waits
+
+
+PreToolUseOutcome = Allow | Deny | Replace | Pause
 
 SessionStartHook = Callable[[SessionStartContext], str | None]
 PreToolUseHook = Callable[[ToolUseContext], PreToolUseOutcome | None]
@@ -118,7 +129,7 @@ class HookRegistry:
         """The first hook that denies or replaces wins; otherwise the call is allowed."""
         for hook in self._hooks[HookEvent.PRE_TOOL_USE]:
             outcome = hook(ctx)
-            if isinstance(outcome, (Deny, Replace)):
+            if isinstance(outcome, (Deny, Replace, Pause)):
                 return Decision(outcome, hook=getattr(hook, "__name__", type(hook).__name__))
         return Decision(Allow())
 

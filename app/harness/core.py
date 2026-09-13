@@ -26,6 +26,7 @@ from app.harness.hooks import (
     Deny,
     HookEvent,
     HookRegistry,
+    Pause,
     Replace,
     SessionStartContext,
     ToolUseContext,
@@ -47,7 +48,7 @@ from app.harness.tools import ToolContext, ToolRegistry, ToolResult
 from app.metrics import TurnRecord, record_turn
 from app.paths import SKILLS_DIR
 from app.retrieval.index import DEFAULT_MILVUS_URI, KnowledgeIndex
-from app.tools import register_all
+from app.tools import handoff, register_all
 
 FRIENDLY_FAILURE = (
     "I'm sorry — I couldn't finish that reply just now. "
@@ -65,6 +66,10 @@ class UnknownCustomer(LookupError):
 
 class SessionCustomerMismatch(ValueError):
     """A request named a different customer than the one the session is bound to."""
+
+
+class NothingPending(LookupError):
+    """A confirmation arrived for a session with no handoff waiting for one."""
 
 
 @dataclass(frozen=True)
@@ -97,10 +102,18 @@ class HarnessConfig:
 
 
 @dataclass(frozen=True)
+class Paused:
+    """A turn stopped at a tool call that needs the customer's answer."""
+
+    reply: str
+    data: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class TurnEvent:
     """What the transport layer forwards to the customer's client."""
 
-    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | done | error
+    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | done | error
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -162,7 +175,7 @@ class Harness:
             result_cap_chars=config.result_cap_chars,
         )
 
-        static = prompt.static_system_prompt(database.get_active_policies(), skills_index(skills))
+        static = prompt.static_system_prompt(database.get_active_policies(), skills_index(skills), team_for=handoff.team_for_policy)
         return cls(provider=provider, config=config, static_prompt=static, hooks=hooks, tools=tools, skills=skills, index=index)
 
     def close(self) -> None:
@@ -171,20 +184,76 @@ class Harness:
 
     # ------------------------------------------------------------------
     def run_turn(self, session_id: str, customer_id: str | None, message: str) -> Iterator[TurnEvent]:
+        """One customer message, to the model's final reply or to a pause for confirmation."""
         session = self._bind_session(session_id, customer_id)
-        turn = TurnState(session_id=session_id, customer_id=session["customer_id"])
+        working_memory = self._settled_working_memory(session_id)
         # Assistant rows carry their reasoning_content on purpose: DeepSeek requires it
         # back whenever `tools` are present (thinking-mode guide).
-        messages = prompt.assemble_messages(
-            self.static_prompt, session["customer_block"], database.load_messages(session_id), message
-        )
-        new_messages: list[dict[str, Any]] = [messages[-1]]  # the customer's message, then everything this turn adds
-        tool_definitions = self.tools.definitions()
+        messages = prompt.assemble_messages(self.static_prompt, session["customer_block"], working_memory, message)
+        turn = TurnState(session_id=session_id, customer_id=session["customer_id"], customer_message=message)
+        yield from self._loop(session, turn, messages, new_messages=[messages[-1]])
 
+    def resume_turn(self, session_id: str, accept: bool) -> Iterator[TurnEvent]:
+        """The customer answered a pending handoff: settle the paused tool call, then let the model go on.
+
+        The tool result is written to working memory before the model is called, so a
+        provider failure here can never leave the transcript with a dangling tool call.
+        """
+        resolved = handoff.resolve(session_id, accept)
+        if resolved is None:
+            raise NothingPending(session_id)
+        call_id, result = resolved
+        session = database.load_session(session_id)
+        if session is None:
+            raise NothingPending(session_id)
+        tool_message = {"role": "tool", "tool_call_id": call_id, "content": result.content}
+        database.append_messages(session_id, [tool_message])
+        messages = prompt.assemble_prefix(self.static_prompt, session["customer_block"], database.load_messages(session_id))
+        turn = TurnState(session_id=session_id, customer_id=session["customer_id"])
+        yield from self._loop(session, turn, messages, new_messages=[])
+
+    def _settled_working_memory(self, session_id: str) -> list[dict[str, Any]]:
+        """Working memory with every proposal answered and every tool call resulted — a valid transcript.
+
+        A handoff still pending when the customer says something else counts as declined. A
+        pending row whose tool call never reached working memory (the customer disconnected
+        while the question was on its way) is abandoned. Any other tool call left without a
+        result gets a "not run" one. Whatever this settles is appended, never rewritten.
+        """
+        working_memory = database.load_messages(session_id)
+        settled: list[dict[str, Any]] = []
+        pending = database.pending_handoff(session_id)
+        if pending is not None:
+            in_transcript = any(
+                c["id"] == pending["tool_call_id"]
+                for m in working_memory if m["role"] == "assistant" for c in m.get("tool_calls") or []
+            )
+            if in_transcript:
+                resolved = handoff.resolve(session_id, accept=False)
+                if resolved is not None:
+                    call_id, result = resolved
+                    settled.append({"role": "tool", "tool_call_id": call_id, "content": result.content})
+            else:
+                database.resolve_handoff(pending["id"], database.HANDOFF_ABANDONED)
+        answered = {m["tool_call_id"] for m in settled}
+        for call_id in database.dangling_tool_call_ids(working_memory):
+            if call_id not in answered:
+                settled.append({"role": "tool", "tool_call_id": call_id, "content": "Not run: the turn ended before this tool could run."})
+        if settled:
+            database.append_messages(session_id, settled)
+        return working_memory + settled
+
+    def _loop(
+        self, session: dict[str, Any], turn: TurnState, messages: list[dict[str, Any]], new_messages: list[dict[str, Any]]
+    ) -> Iterator[TurnEvent]:
+        """Request → tool rounds → reply. `new_messages` is what this turn appends to working memory."""
+        session_id = turn.session_id
+        tool_definitions = self.tools.definitions()
         turn_id = uuid.uuid4().hex
         started = time.perf_counter()
         books = _Books(model=self.config.main_model)
         announced_thinking = False
+        paused: Paused | None = None
 
         def book(error: str | None = None) -> None:
             record_turn(TurnRecord(
@@ -243,9 +312,20 @@ class Harness:
 
                 turn.tool_rounds += 1
                 for call in completion.tool_calls:
-                    result_message = yield from self._run_tool(turn, call, books)
-                    messages.append(result_message)
-                    new_messages.append(result_message)
+                    if paused is not None:
+                        # The turn is waiting for the customer; nothing else in this round runs.
+                        skipped = _tool_message(call, "Not run: the turn paused for the customer's confirmation.")
+                        messages.append(skipped)
+                        new_messages.append(skipped)
+                        continue
+                    outcome = yield from self._run_tool(turn, call, books)
+                    if isinstance(outcome, Paused):
+                        paused = outcome  # its tool result arrives when the customer answers
+                        continue
+                    messages.append(outcome)
+                    new_messages.append(outcome)
+                if paused is not None:
+                    break
         except GeneratorExit:
             # The customer went away mid-reply. The tokens were still spent; keep the books.
             book(error="ClientDisconnected")
@@ -263,16 +343,22 @@ class Harness:
         yield TurnEvent("done", {
             "turn_id": turn_id,
             "session_id": session_id,
-            "reply": completion.content,
+            # When the model asked the customer in its own words alongside the tool call, use those.
+            "reply": (completion.content.strip() or paused.reply) if paused else completion.content,
             "usage": asdict(books.usage),
             "latency_ms": int((time.perf_counter() - started) * 1000),
             "tool_rounds": turn.tool_rounds,
             "sources": turn.sources,
+            "pending_handoff": paused.data if paused else None,
         })
 
     # ------------------------------------------------------------------
-    def _run_tool(self, turn: TurnState, call: ToolCall, books: _Books) -> Generator[TurnEvent, None, dict[str, Any]]:
-        """Dispatch one tool call through the hooks, yielding events as they happen; returns the tool message."""
+    def _run_tool(self, turn: TurnState, call: ToolCall, books: _Books) -> Generator[TurnEvent, None, "dict[str, Any] | Paused"]:
+        """Dispatch one tool call through the hooks, yielding events as they happen.
+
+        Returns the tool message to append — or a `Paused` marker when a hook stopped the
+        turn to ask the customer, in which case the tool result arrives with their answer.
+        """
         yield TurnEvent("tool_call", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
         books.tools_called.append(call.name)
 
@@ -291,6 +377,11 @@ class Harness:
             books.outcome("denied")
             yield TurnEvent("hook_blocked", {"call_id": call.id, "tool": call.name, "hook": decision.hook})
             return _tool_message(call, f"Blocked by {decision.hook}: {decision.outcome.feedback}")
+
+        if isinstance(decision.outcome, Pause):
+            books.outcome("paused")
+            yield TurnEvent(decision.outcome.event, {"call_id": call.id, **decision.outcome.data})
+            return Paused(reply=decision.outcome.reply, data=decision.outcome.data)
 
         if isinstance(decision.outcome, Replace):
             books.outcome("replaced")
