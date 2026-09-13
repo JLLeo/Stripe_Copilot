@@ -19,8 +19,9 @@ __pycache__/
 # Personal notes — not for the repo
 INTERVIEW.md
 
-# Runtime database and SQLite sidecars (the seed database stays tracked)
-data/runtime.db
+# Only the seed database is tracked under data/; runtime state and sidecars are not
+data/*.db
+!data/seed.db
 data/*.db-wal
 data/*.db-shm
 data/*.building
