@@ -1,12 +1,13 @@
 """
-Shared pytest configuration.
+Shared pytest configuration and fixtures.
 
 Every run gets its own runtime database, so tests never write to
 data/runtime.db and never touch the tracked seed database. No test talks to a
 model: the app always starts with a harness over a ScriptedProvider, and tests
-that need to script replies install their own.
+that script replies get their own via the `client` / `provider` fixtures.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -39,3 +40,64 @@ def _scripted_default_harness(_isolated_runtime_db):
     main.app.state.harness = Harness.build(provider=ScriptedProvider())
     yield
     main.app.state.harness = None
+
+
+# ---------------------------------------------------------------------------
+# Driving the HTTP seam with a scripted provider
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def provider():
+    from app.harness.scripted import ScriptedProvider
+
+    return ScriptedProvider()
+
+
+@pytest.fixture
+def harness_config(request):
+    """Override per test with `@pytest.mark.parametrize("harness_config", [HarnessConfig(...)], indirect=True)`."""
+    from app.harness.core import HarnessConfig
+
+    return getattr(request, "param", None) or HarnessConfig()
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch, provider, harness_config):
+    """TestClient over the app with a fresh runtime DB and a harness on `provider`."""
+    from fastapi.testclient import TestClient
+
+    from app import database, main
+    from app.harness.core import Harness
+
+    monkeypatch.setenv("RUNTIME_DB_PATH", str(tmp_path / "runtime.db"))
+    database.close_connection()
+    previous = main.app.state.harness
+    main.app.state.harness = Harness.build(provider=provider, config=harness_config)
+    with TestClient(main.app) as c:
+        yield c
+    main.app.state.harness = previous
+    database.close_connection()
+
+
+def sse_events(body: str) -> list[tuple[str, dict]]:
+    """Parse an SSE body into (event, data) pairs."""
+    out = []
+    for block in body.strip().split("\n\n"):
+        event, data = None, None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event = line[7:]
+            elif line.startswith("data: "):
+                data = json.loads(line[6:])
+        out.append((event, data))
+    return out
+
+
+def first_customer(client) -> dict:
+    return client.get("/api/customers").json()[0]
+
+
+def chat(client, session_id: str, message: str, customer_id: str | None = None):
+    body = {"session_id": session_id, "message": message}
+    if customer_id:
+        body["customer_id"] = customer_id
+    return client.post("/sales-agent/chat", json=body)

@@ -51,6 +51,7 @@ class CompletionRequest:
     tools: tuple[dict[str, Any], ...] = ()
     max_tokens: int = 4096
     thinking: str = "enabled"  # DeepSeek: "enabled" | "disabled"
+    tool_choice: str | None = None  # None (auto) or "none" to force a text answer
 
 
 @dataclass(frozen=True)

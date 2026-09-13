@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from app.database import get_connection, init_db
 from app.harness.core import Harness, SessionCustomerMismatch, TurnEvent, UnknownCustomer
 from app.harness.deepseek import DeepSeekProvider
-from app.metrics import init_metrics, summary
+from app.metrics import init_metrics, summary, tool_usage
 from app.schemas import ChatRequest, ChatResponse
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -123,4 +123,4 @@ def chat_stream(body: ChatRequest, request: Request):
 @app.get("/api/metrics")
 def get_metrics(days: int = 7):
     """Turn volume, latency, tokens per turn, and prompt-cache hit rate."""
-    return {"window_days": days, "summary": summary(days)}
+    return {"window_days": days, "summary": summary(days), "tool_usage": tool_usage(days)}

@@ -70,6 +70,8 @@ class DeepSeekProvider:
         }
         if request.tools:
             kwargs["tools"] = list(request.tools)
+            if request.tool_choice:
+                kwargs["tool_choice"] = request.tool_choice
 
         text: list[str] = []
         reasoning: list[str] = []

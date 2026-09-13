@@ -18,14 +18,20 @@ HTTP (FastAPI)                 Harness                              Provider
 ───────────────                ───────                              ────────
 POST /sales-agent/stream ──►  run_turn(session, customer, msg)
                                ├─ load_session ─ or ─ SessionStart hooks ─► customer block
-                               ├─ assemble: [static system][customer block][messages…][user]
-                               ├─ provider.complete(request) ─────────────► DeepSeek (stream)
-                               │     TextDelta ──► SSE text_delta            reasoning_content
-                               │     ReasoningDelta ──► SSE thinking (once)  tool_calls (#4)
-                               │     Completed ──► usage
-                               ├─ append_messages(user, assistant)
-                               ├─ record_turn(tokens, cache hit/miss, latency)
-                               └─ SSE done { reply, usage, latency_ms }
+                               ├─ assemble: [static system][customer block][messages…][user] + tools
+                               ├─ loop:
+                               │   provider.complete(request) ──────────────► DeepSeek (stream)
+                               │     TextDelta ──► SSE text_delta              reasoning_content
+                               │     ReasoningDelta ──► SSE thinking (once)    tool_calls
+                               │     Completed ──► usage, tool_calls
+                               │   for each tool call:
+                               │     PreToolUse hooks ─► Allow | Deny(feedback) | Replace(cached)
+                               │     tool.run ─► PostToolUse hooks (result_cap, cache store)
+                               │     SSE tool_call · skill_loaded | tool_result | hook_blocked
+                               │   until the reply has no tool calls
+                               ├─ append_messages(user, assistant, tool…, assistant)
+                               ├─ record_turn(tokens, cache hit/miss, tools, skills, hooks, rounds)
+                               └─ SSE done { reply, usage, latency_ms, tool_rounds }
 ```
 
 ## Harness — `app/harness/`
@@ -33,8 +39,9 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
 ### The turn — `core.py`
 
 `Harness.run_turn(session_id, customer_id, message)` is a generator of `TurnEvent`s
-(`thinking`, `text_delta`, `done`, `error`). The transport layer forwards them as
-Server-Sent Events or, for the synchronous endpoint, keeps only the last one.
+(`thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`, `text_delta`,
+`done`, `error`). The transport layer forwards them as Server-Sent Events or, for the
+synchronous endpoint, keeps only the last one.
 
 1. **Session binding.** An unseen `session_id` triggers **SessionStart**: the Customer
    Profile and product usage are loaded from the seed database and the SessionStart
@@ -45,12 +52,23 @@ Server-Sent Events or, for the synchronous endpoint, keeps only the last one.
 2. **Request assembly** in the fixed order — see below.
 3. **Completion.** The Provider streams; text deltas are forwarded immediately, the
    first reasoning delta is announced once as `thinking`, and the final `Completed`
-   event carries usage.
-4. **Working memory.** The customer message and the assistant reply (with its
-   `reasoning_content`, which DeepSeek requires back once tools are in play) are
-   appended as two `messages` rows. Nothing is ever updated.
-5. **Metrics.** One `TurnRecord`: model, prompt/completion/reasoning tokens,
-   `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, latency, error.
+   event carries usage and any tool calls.
+4. **Tool rounds.** While the reply carries tool calls, each call goes through the
+   `PreToolUse` hooks (allow, deny with feedback, or replace with a cached result), the
+   tool runs, the `PostToolUse` hooks may rewrite the result, and a `tool` message is
+   appended; then the model is called again with everything so far. A round is one
+   model response with tool calls; several calls in one response run in order and all
+   their results go back together. Unknown tools, malformed arguments, missing
+   required arguments and tool exceptions all come back to the model as feedback in
+   the tool message — the customer never sees them.
+5. **Working memory.** The customer message and every assistant and tool message of
+   the turn (assistant rows with their `reasoning_content`, which DeepSeek requires
+   back whenever `tools` are present) are appended as `messages` rows. Nothing is
+   ever updated.
+6. **Metrics.** One `TurnRecord`: model, prompt/completion/reasoning tokens summed over
+   the turn's rounds, `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, provider
+   calls, tool rounds, tools called, skills loaded, hook outcomes, tool-cache hits,
+   latency, error.
 
 A provider failure — after the client library's own retries — ends the turn with an
 `error` event carrying a fixed friendly message, records the turn with the error
@@ -58,8 +76,9 @@ class, and appends nothing, so the next message starts from unchanged working me
 If the customer disconnects mid-reply the turn is still metered (error
 `ClientDisconnected`) and, again, nothing is appended.
 
-`HarnessConfig` (main model `deepseek-v4-pro`, `max_tokens`, `thinking`) is read
-from `HARNESS_*` environment variables. Session binding is strict: an unknown
+`HarnessConfig` (main model `deepseek-v4-pro`, `max_tokens`, `thinking`, `skills_dir`,
+`tool_round_budget`, `result_cap_chars`, `tool_cache_ttl_seconds`) is read from
+`HARNESS_*` environment variables. Session binding is strict: an unknown
 `customer_id` is refused (HTTP 404) rather than downgraded to a prospect, and a session
 never switches customer (HTTP 409).
 
@@ -69,8 +88,8 @@ Every request is built in this order and only this order:
 
 | Position | Content | Stability |
 |---|---|---|
-| `messages[0]` system | **Static prompt**: role, conduct (mirror the customer's language, admit being an AI, decline out-of-scope), the never-do list (no custom pricing, no roadmap promises, no tax/legal advice, no security documents, no fraud guarantees, no internal guidance), then the active rows of `sales_policy_updates` sorted by area and title | identical for every session in the process; rendered once at startup |
-| `tools` | tool definitions | empty — *arrives with #4* |
+| `messages[0]` system | **Static prompt**: role, conduct (mirror the customer's language, admit being an AI, decline out-of-scope), the never-do list (no custom pricing, no roadmap promises, no tax/legal advice, no security documents, no fraud guarantees, no internal guidance), the active rows of `sales_policy_updates` sorted by area and title, then the **skill index** — one line per skill, descriptions only | identical for every session in the process; rendered once at startup |
+| `tools` | tool definitions from the registry, in registration order: `Skill`, `get_my_profile`, `list_products`, `get_pricing` | identical for every request in the process |
 | `messages[1]` system | **Customer block**: profile fields and products in use, or the prospect notice | identical for the life of the session |
 | `messages[2:]` | working memory, oldest first, then the new customer message | append-only |
 
@@ -78,21 +97,66 @@ No dates, timestamps, or identifiers appear anywhere before the newest message; 
 asserts the serialized prefix is byte-identical between consecutive turns. On the live
 model this gives cache hits from the second turn onward (see README, "Measured").
 
-### Hooks — `hooks.py`
+### Skills — `skills.py`, `skills/<name>/SKILL.md`
+
+A skill is a markdown file with YAML frontmatter (`name` must match its directory;
+`description` is one line, ≤200 characters) and a body. `load_skills()` validates every
+file when the harness is built, so a broken skill fails startup, not a conversation.
+The static prompt carries only the index of descriptions; the body reaches the model
+as the result of the `Skill(name)` tool, whose `name` parameter is an enum of the loaded
+skills. Several skills may be loaded in one round. Skills recommend tools in prose and
+carry no allowlist — restricting tools by skill would be a router, not a guardrail
+([ADR 0001](docs/adr/0001-model-decides-guardrails-constrain.md)).
+
+Seven product skills exist, authored from the public product documentation only
+([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)):
+`payments`, `billing`, `connect`, `tax`, `fraud_protection`, `terminal`, `data`. Each
+gives the model the products in the area, when to recommend which, what to establish
+first, public pricing, and when to offer a human.
+
+### Tools — `tools.py`, `app/tools/`
+
+A `Tool` is a name, a description, a JSON schema and a function
+`(ToolContext, arguments) -> ToolResult`. The `ToolRegistry` renders definitions in
+registration order (they are part of the cached prefix), parses arguments and checks
+them against `required` and `properties`, and turns tool exceptions into error results.
+Results are compact JSON — they live in every later request of the session.
+
+| Tool | Source | Notes |
+|---|---|---|
+| `Skill(name)` | `skills/` | not cacheable: a load must always land in the conversation |
+| `get_my_profile()` | seed `customers` + `customer_product_usage` | no parameters; reads the session's bound customer, so another customer cannot be named |
+| `list_products(group?)` | seed `stripe_products` | name, group, one-line description |
+| `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing |
+
+### Hooks and guardrails — `hooks.py`, `guardrails.py`
 
 `HookEvent` names the five moments — `SessionStart`, `PreToolUse`, `PostToolUse`,
-`Stop`, `SessionEnd` — and `HookRegistry` keeps hooks per event. Only `SessionStart`
-has a dispatcher today: each registered hook receives the session, profile and usage
-and returns text for the customer block. The
-tool-side events and their allow / deny-with-feedback / pause outcomes *arrive with #4*
-and *#8*.
+`Stop`, `SessionEnd` — and `HookRegistry` keeps hooks per event in registration order.
+
+- **SessionStart** hooks return text for the customer block.
+- **PreToolUse** hooks return `Allow`, `Deny(feedback)` or `Replace(result)`; the first
+  deny or replace wins. A deny becomes the tool message `Blocked by <hook>: <feedback>`
+  and the loop continues, so the model reads why and adjusts.
+- **PostToolUse** hooks may return a modified `ToolResult`.
+- `Stop` and `SessionEnd` gain dispatchers with *#5* and *#10*.
+
+| Guardrail | Hook | Rule |
+|---|---|---|
+| `turn_budget` | PreToolUse | after 8 rounds of tool calls in a turn, every further call is denied and the turn is marked exhausted; the next request carries `tool_choice="none"`, so the model must answer in text. If it still asks for tools, the harness stops the turn with a fixed "here is what I have so far" reply (`hard_stop`) rather than looping on denials |
+| `tool_cache_lookup` | PreToolUse | an identical call (tool + arguments) within the session is replaced by the cached result (TTL 15 min, 50 entries per session, 200 sessions) |
+| `result_cap` | PostToolUse | results over 6,000 characters (~1.5K tokens) are cut at a JSON element, sentence or line boundary with a `[truncated: showing N of M characters]` note |
+| `tool_cache_store` | PostToolUse | successful cacheable results enter the cache |
+
+Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `hard_stop`.
 
 ### The Provider seam — `provider.py`
 
 The only path to a model. `complete(CompletionRequest) -> Iterator[StreamEvent]`
-streams `TextDelta` / `ReasoningDelta` events and ends with `Completed(completion)`;
-`embed(texts)` returns vectors. `CompletionRequest` carries the wire-shaped
-`messages` and `tools`, `max_tokens`, and the DeepSeek `thinking` switch. Two
+streams `TextDelta` / `ReasoningDelta` events and ends with `Completed(completion)`,
+whose `tool_calls` carry the raw JSON arguments the model wrote; `embed(texts)` returns
+vectors. `CompletionRequest` carries the wire-shaped `messages` and `tools`,
+`max_tokens`, the DeepSeek `thinking` switch, and an optional `tool_choice`. Two
 adapters exist, which is what makes it a real seam:
 
 - **`DeepSeekProvider`** (`deepseek.py`) — DeepSeek's OpenAI-compatible Chat
@@ -115,14 +179,16 @@ its own on `app.state.harness` first.
 | Endpoint | Behaviour |
 |---|---|
 | `POST /sales-agent/chat` | runs a turn, returns the `done`/`error` payload as `ChatResponse` |
-| `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` |
+| `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
 | `GET /api/customers` | sign-in selector |
-| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate |
+| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn; `tool_usage()` — calls per tool |
 | `GET /` | the chat UI |
 
 The UI (`static/index.html`) is a single page: a sign-in-as-customer selector, a
-streamed conversation, and per-reply latency / token / cache-hit figures. The session
-id lives in `localStorage` per customer.
+streamed conversation with a Claude Code-style activity list above each reply (one row
+per tool call: skill loaded, result size, cached, or blocked-by-hook), and per-reply
+latency / token / cache-hit / tool-round figures. The session id lives in
+`localStorage` per customer.
 
 ## Data layer
 
@@ -169,15 +235,19 @@ BM25 sibling collection, and moves embeddings onto the Provider seam.
 
 ## Observability — `app/metrics.py`
 
-`TurnRecord` → `turn_metrics`. `summary(days)` returns turn count, error count,
+`TurnRecord` → `turn_metrics`. `init_metrics()` creates the table and adds any column an
+older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the schema), so a
+`runtime.db` from an earlier version keeps working. `summary(days)` returns turn count, error count,
 average latency, average prompt / completion / reasoning tokens, total cache hit and
-miss tokens, and `cache_hit_rate = hit / (hit + miss)`. Prompt-cache hit rate is a
+miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits and
+provider calls per turn; `tool_usage(days)` counts calls per tool. Each row also keeps
+the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
 first-class number because the prefix discipline in ADR 0005 is easy to break by
 accident and this is where a break shows first.
 
 ## Testing
 
-68 tests, no network, one temp runtime database per run, ~4 s. The app under test
+92 tests, no network, one temp runtime database per run, ~3 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -192,7 +262,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 
 | Ticket | Adds |
 |---|---|
-| #4 | tool registry, `PreToolUse` / `PostToolUse` dispatch, `Skill` loading, profile / product / pricing tools, `turn_budget`, `result_cap`, tool cache |
 | #5 | `ask_customer`, `Stop` guardrails (`anti_placeholder`, `internal_canary`) |
 | #6 | public-only ingestion, hybrid dense + BM25 search, model-driven entity linking, LangChain removed |
 | #7 | the `research` sub-agent |

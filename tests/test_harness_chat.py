@@ -10,57 +10,14 @@ import json
 import re
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import database, main
-from app.harness.core import Harness
 from app.harness.provider import Completion, Usage
-from app.harness.scripted import ScriptedProvider
+from tests.conftest import chat as _chat
+from tests.conftest import first_customer as _customer
+from tests.conftest import sse_events as _events
 
 pytestmark = pytest.mark.unit
-
-
-def _events(body: str) -> list[tuple[str, dict]]:
-    """Parse an SSE body into (event, data) pairs."""
-    out = []
-    for block in body.strip().split("\n\n"):
-        event, data = None, None
-        for line in block.splitlines():
-            if line.startswith("event: "):
-                event = line[7:]
-            elif line.startswith("data: "):
-                data = json.loads(line[6:])
-        out.append((event, data))
-    return out
-
-
-@pytest.fixture
-def provider() -> ScriptedProvider:
-    return ScriptedProvider()
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch, provider):
-    """TestClient over the app with a fresh runtime DB and a harness on `provider`."""
-    monkeypatch.setenv("RUNTIME_DB_PATH", str(tmp_path / "runtime.db"))
-    database.close_connection()
-    previous = main.app.state.harness
-    main.app.state.harness = Harness.build(provider=provider)
-    with TestClient(main.app) as c:
-        yield c
-    main.app.state.harness = previous
-    database.close_connection()
-
-
-def _customer(client) -> dict:
-    return client.get("/api/customers").json()[0]
-
-
-def _chat(client, session_id, message, customer_id=None):
-    body = {"session_id": session_id, "message": message}
-    if customer_id:
-        body["customer_id"] = customer_id
-    return client.post("/sales-agent/chat", json=body)
 
 
 # =========================================================================
@@ -88,7 +45,7 @@ def test_request_is_built_in_the_fixed_order(client, provider):
     request = provider.requests[0]
     assert [m["role"] for m in request.messages] == ["system", "system", "user"], \
         "static prompt, customer block, then working memory"
-    assert request.tools == ()  # empty until the tools ticket
+    assert [t["function"]["name"] for t in request.tools][0] == "Skill", "tool definitions travel with every request"
     assert customer["customer_name"] in request.messages[1]["content"]
     assert customer["customer_name"] not in request.messages[0]["content"]
 

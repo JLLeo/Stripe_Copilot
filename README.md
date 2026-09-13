@@ -4,11 +4,11 @@ A customer-facing AI sales agent for Stripe, built on a hand-written harness in 
 style of Claude Code: the model decides what to do on every turn; deterministic code
 only builds the request, moves bytes, and guards the edges.
 
-This branch is a ground-up rebuild in progress. What exists today is the first
-tracer bullet — a customer signs in, asks a question, and gets a streamed answer
-through the new harness, with prompt-cache metrics on every turn. Tools, skills,
-retrieval, handoff, and memory land ticket by ticket
-([issues #4–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
+This branch is a ground-up rebuild in progress. Today a customer signs in, asks a
+question, and watches the agent load the relevant skill, look up the profile, catalogue
+or public pricing, and answer — every step streamed, every turn metered. Knowledge
+search, clarifying questions, handoff, and memory land ticket by ticket
+([issues #5–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
 
 ---
 
@@ -22,14 +22,16 @@ customer message  ─►  /sales-agent/stream
              │ Harness.run_turn            │
              │  1. SessionStart (first     │   customer block frozen from
              │     contact only)           │   the Customer Profile
-             │  2. assemble request        │   fixed order, append-only
+             │  2. assemble request        │   static prompt · tools · customer · memory
              │  3. Provider.complete       │   DeepSeek, streamed
-             │  4. append both messages    │   working memory
-             │  5. record TurnRecord       │   tokens, cache hit/miss, latency
+             │  4. tool calls?             │   PreToolUse → run → PostToolUse,
+             │     └─ round again          │   Skill / get_my_profile / list_products / get_pricing
+             │  5. append every message    │   working memory
+             │  6. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
              └─────────────────────────────┘
                           │
                           ▼
-        SSE: thinking? · text_delta* · done | error
+   SSE: thinking? · (tool_call · skill_loaded | tool_result | hook_blocked)* · text_delta* · done | error
 ```
 
 Every request is built in the same order — static system prompt, tool definitions
@@ -53,9 +55,15 @@ stripe-sales-copilot/
 │   │   ├── provider.py       # The Provider seam: CompletionRequest → stream of events
 │   │   ├── deepseek.py       # Production adapter: DeepSeek chat + OpenAI embeddings
 │   │   ├── scripted.py       # Test adapter: plays a script, records every request
-│   │   ├── prompt.py         # Static system prompt, customer block, fixed-order assembly
-│   │   ├── hooks.py          # Hook events; SessionStart dispatch
-│   │   └── core.py           # Harness.run_turn — the loop
+│   │   ├── prompt.py         # Static system prompt (incl. skill index), customer block, fixed order
+│   │   ├── tools.py          # Tool = function + JSON schema; registry; argument checks
+│   │   ├── skills.py         # SKILL.md loader + the Skill tool
+│   │   ├── hooks.py          # Hook events; SessionStart / PreToolUse / PostToolUse dispatch
+│   │   ├── guardrails.py     # turn_budget, result_cap, tool cache
+│   │   └── core.py           # Harness.run_turn — the loop with tool rounds
+│   ├── tools/
+│   │   ├── profile.py        # get_my_profile() — no arguments, bound customer only
+│   │   └── catalog.py        # list_products(group?), get_pricing(product)
 │   ├── kg_builder.py         # Knowledge graph loader (retained; rewired in #6)
 │   ├── kg_retriever.py       # Entity linking + graph expansion (retained; rewired in #6)
 │   ├── milvus_retriever.py   # Milvus search (retained; rewired in #6)
@@ -65,9 +73,10 @@ stripe-sales-copilot/
 │   ├── seed.db               # Tracked, read-only: customers, products, usage, policies
 │   └── runtime.db            # Gitignored, created on first start: sessions, messages, metrics
 ├── scripts/build_seed_db.py  # Rebuild data/seed.db from data.xlsx
+├── skills/<name>/SKILL.md    # 7 product skills the model loads on demand
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite index (278 chunks)
-├── tests/                    # 68 tests, no network, ~4s
+├── tests/                    # 92 tests, no network, ~3s
 ├── docs/adr/                 # Architecture decision records
 ├── CONTEXT.md                # Domain glossary
 └── ARCHITECTURE.md
@@ -94,7 +103,8 @@ python -m uvicorn app.main:app --reload
 ```
 
 Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_MAX_TOKENS`,
-`HARNESS_THINKING=enabled|disabled`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`.
+`HARNESS_THINKING=enabled|disabled`, `HARNESS_TOOL_ROUND_BUDGET` (8), `HARNESS_RESULT_CAP_CHARS`
+(6000), `HARNESS_TOOL_CACHE_TTL_SECONDS` (900), `HARNESS_SKILLS_DIR`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`.
 
 ## API
 
@@ -103,8 +113,8 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_MAX_TOKENS`,
 | `GET` | `/` | Customer chat UI |
 | `GET` | `/api/customers` | Customers for the sign-in selector |
 | `POST` | `/sales-agent/chat` | One turn, JSON reply. `404` unknown customer, `409` session already bound to another customer |
-| `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, `text_delta`*, then `done` or `error` |
-| `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate |
+| `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked`), `text_delta`*, then `done` or `error` |
+| `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, calls per tool |
 
 Request body for both chat endpoints:
 
@@ -118,7 +128,7 @@ customer on first contact and refuses to switch.
 ## Testing
 
 ```bash
-pytest            # 68 tests in ~4s; no model calls, temp runtime database
+pytest            # 92 tests in ~3s; no model calls, temp runtime database
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
@@ -129,6 +139,7 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | Test file | Covers |
 |---|---|
 | `tests/test_harness_chat.py` | The turn end to end: fixed order, prefix stability, SessionStart block, prospect sessions, unknown/mismatched customer, SSE incl. `thinking`, friendly failure, disconnect metering, metrics |
+| `tests/test_tools_and_skills.py` | Skill index vs body, Skill → tool → answer, parallel skill loads, profile scoping, catalogue and pricing tools, argument feedback, `turn_budget`, `result_cap`, tool cache, prefix stability with tools, tool metrics, SSE tool events |
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
 | `tests/test_api_customers.py` | Customer list served through the shared connection |
@@ -136,16 +147,41 @@ what the customer block contained, that no timestamp leaked into the cached pref
 
 Running the suite leaves `git status` clean: the suite uses its own runtime database.
 
+## Skills and tools
+
+Skills are `skills/<name>/SKILL.md` files — YAML frontmatter (`name`, `description`) and a
+markdown body. The static prompt carries only the descriptions; the body enters the
+conversation when the model calls `Skill(name)`, so the model decides when a skill
+applies. Several can be loaded in one round. Skills recommend tools; they never restrict
+them. Adding a behaviour is adding a file.
+
+| Tool | What the model gets |
+|---|---|
+| `Skill(name)` | the skill body; one of `payments`, `billing`, `connect`, `tax`, `fraud_protection`, `terminal`, `data` |
+| `get_my_profile()` | the bound customer's profile and products in use — no arguments, so no way to ask about anyone else |
+| `list_products(group?)` | the catalogue from the seed database |
+| `get_pricing(product)` | public list prices for the product, read from the `Price` sections of knowledge-base documents marked `Access Level: public` (the seed database holds no prices); when nothing matches it says so instead of guessing |
+
+Every call passes through the hooks: `turn_budget` (8 tool rounds per turn; the ninth
+is denied with feedback, the next request forces a text answer, and a model that still
+asks for tools is stopped), `tool_cache_lookup` (identical calls within a session are
+served from a TTL cache), `result_cap` (results over ~1.5K tokens are truncated at a
+boundary with a note), `tool_cache_store`. An existing `data/runtime.db` is upgraded in
+place on startup when the metrics table gains columns.
+
 ## Measured on the live model
 
-Two-turn session, `deepseek-v4-pro`, thinking enabled:
+`deepseek-v4-pro`, thinking enabled, one customer session:
 
 | | Turn 1 | Turn 2 |
 |---|---|---|
-| Prompt tokens | 1,130 | 1,169 |
-| Cache hit / miss | 0 / 1,130 | **1,024 / 145** |
-| Reasoning tokens | 128 | 126 |
-| Latency | 3.7 s | 2.8 s |
+| What the model did | `Skill(fraud_protection)` + `get_pricing(Radar)` in one round, then answered | `Skill(billing)` + `get_pricing(Billing)`, answered using the profile's products in use |
+| Prompt tokens (both rounds) | 4,982 | 8,322 |
+| Cache hit / miss | 2,176 / 2,806 | **7,424 / 898** |
+| Reasoning tokens | 584 | 1,049 |
+| Latency | 14.5 s | 18.3 s |
+
+Before tools (turn 2 of a plain two-turn chat): 1,024 of 1,169 prompt tokens from cache, ~3 s.
 
 ## Documents
 

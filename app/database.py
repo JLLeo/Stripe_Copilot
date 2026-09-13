@@ -27,12 +27,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.paths import DATA_DIR
+
 # ---------------------------------------------------------------------------
 # Paths and table ownership
 # ---------------------------------------------------------------------------
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DEFAULT_SEED_DB_PATH = _DATA_DIR / "seed.db"
-DEFAULT_RUNTIME_DB_PATH = _DATA_DIR / "runtime.db"
+DEFAULT_SEED_DB_PATH = DATA_DIR / "seed.db"
+DEFAULT_RUNTIME_DB_PATH = DATA_DIR / "runtime.db"
 
 SEED_TABLES: tuple[str, ...] = (
     "customers",
@@ -45,6 +46,22 @@ RUNTIME_TABLES: tuple[str, ...] = (
     "messages",
     "turn_metrics",  # DDL lives in app.metrics.init_metrics; ownership is recorded here.
 )
+
+# The Customer Profile as the agent may see it: column -> label. Shared by the
+# customer block and the get_my_profile tool so the two never drift apart.
+CUSTOMER_PROFILE_FIELDS: dict[str, str] = {
+    "company_stage": "Company stage",
+    "industry": "Industry",
+    "business_model": "Business model",
+    "use_case": "Use case",
+    "country": "Country",
+    "annual_payment_volume": "Annual payment volume (USD)",
+    "monthly_transactions": "Monthly transactions",
+    "average_order_value": "Average order value (USD)",
+    "primary_pain_point": "Primary pain point",
+    "fraud_risk_level": "Fraud risk level",
+    "integration_maturity": "Integration maturity",
+}
 
 
 def seed_db_path() -> Path:
@@ -233,6 +250,26 @@ def get_customer_product_usage(customer_id: str) -> list[dict[str, Any]]:
         (customer_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def list_products(group: str | None = None) -> list[dict[str, Any]]:
+    """The product catalogue, optionally one product group (case-insensitive), sorted by group then name."""
+    conn = get_connection()
+    if group:
+        rows = conn.execute(
+            "SELECT * FROM stripe_products WHERE LOWER(product_group) = LOWER(?) ORDER BY product_name",
+            (group,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM stripe_products ORDER BY product_group, product_name").fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_product_groups() -> list[str]:
+    rows = get_connection().execute(
+        "SELECT DISTINCT product_group FROM stripe_products ORDER BY product_group"
+    ).fetchall()
+    return [r[0] for r in rows]
 
 
 def get_active_policies() -> list[dict[str, Any]]:

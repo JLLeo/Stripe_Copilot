@@ -48,6 +48,16 @@
   .msg.customer .bubble { background: var(--panel-2); }
   .msg .bubble.error { border-color: var(--err); color: #ffd3dc; }
   .meta { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .activity { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .activity:empty { display: none; }
+  .act { display: flex; align-items: baseline; gap: 8px; font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+  .act .k { color: var(--accent-2); flex: 0 0 auto; }
+  .act .k::before { content: "▸ "; color: var(--line); }
+  .act.blocked .k { color: var(--warn); }
+  .act.error .k { color: var(--err); }
+  .act .args { color: var(--text); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52ch; }
+  .act .r { flex: 0 0 auto; }
+  .act .r.cached::after { content: " · cached"; color: var(--ok); }
   .status { color: var(--muted); font-size: 13px; font-style: italic; }
   .status::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent-2); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .2; } }
@@ -124,11 +134,27 @@
     document.querySelector(".empty")?.remove();
     const wrap = document.createElement("div");
     wrap.className = "msg " + role;
-    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="bubble"></div><div class="meta"></div></div>`;
+    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="meta"></div></div>`;
     wrap.querySelector(".bubble").textContent = text || "";
     thread.appendChild(wrap);
     scroll();
     return wrap;
+  }
+
+  function addActivity(wrap, kind, key, args, result) {
+    const row = document.createElement("div");
+    row.className = "act " + kind;
+    row.innerHTML = `<span class="k"></span><span class="args"></span><span class="r"></span>`;
+    row.querySelector(".k").textContent = key;
+    row.querySelector(".args").textContent = args || "";
+    if (result) { row.querySelector(".r").textContent = result.text || ""; if (result.cached) row.querySelector(".r").classList.add("cached"); }
+    wrap.querySelector(".activity").appendChild(row);
+    scroll();
+    return row;
+  }
+  function shortArgs(raw) {
+    try { const o = JSON.parse(raw || "{}"); const s = Object.entries(o).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", "); return s ? `(${s})` : "()"; }
+    catch { return raw || ""; }
   }
 
   function setStatus(wrap, text) {
@@ -141,6 +167,7 @@
     const u = done.usage || {};
     const cache = (u.cache_hit_tokens + u.cache_miss_tokens) ? Math.round(100 * u.cache_hit_tokens / (u.cache_hit_tokens + u.cache_miss_tokens)) + "% cache hit" : "";
     meta.innerHTML = [done.latency_ms != null ? (done.latency_ms / 1000).toFixed(1) + "s" : "", u.prompt_tokens != null ? `${u.prompt_tokens}→${u.completion_tokens} tokens` : "", cache]
+      .concat(done.tool_rounds ? [`${done.tool_rounds} tool round${done.tool_rounds > 1 ? "s" : ""}`] : [])
       .filter(Boolean).map((t) => `<span>${escapeHtml(t)}</span>`).join("");
   }
 
@@ -151,6 +178,7 @@
     addMessage("customer", text);
     const reply = addMessage("agent", "");
     const bubble = reply.querySelector(".bubble");
+    const pending = {};
     setStatus(reply, "thinking");
 
     try {
@@ -174,6 +202,10 @@
             else if (line.startsWith("data: ")) { try { data = JSON.parse(line.slice(6)); } catch {} }
           }
           if (event === "thinking") setStatus(reply, "thinking");
+          else if (event === "tool_call") { pending[data.call_id] = addActivity(reply, "tool", data.name, shortArgs(data.arguments)); setStatus(reply, data.name === "Skill" ? "loading skill" : "looking things up"); }
+          else if (event === "skill_loaded") { const row = pending[data.call_id]; if (row) { row.querySelector(".k").textContent = "Skill"; row.querySelector(".args").textContent = data.name; row.querySelector(".r").textContent = "loaded"; } }
+          else if (event === "tool_result") { const row = pending[data.call_id]; if (row) { const r = row.querySelector(".r"); r.textContent = data.is_error ? "error" : `${data.chars} chars`; if (data.cached) r.classList.add("cached"); if (data.is_error) row.classList.add("error"); } }
+          else if (event === "hook_blocked") { const row = pending[data.call_id]; if (row) { row.classList.add("blocked"); row.querySelector(".r").textContent = `blocked by ${data.hook}`; } }
           else if (event === "text_delta") { if (!bubble.textContent) setStatus(reply, ""); bubble.textContent += data.text || ""; scroll(); }
           else if (event === "done") finish(reply, data);
           else if (event === "error") { bubble.textContent = data.reply || "Something went wrong."; bubble.classList.add("error"); setStatus(reply, ""); }

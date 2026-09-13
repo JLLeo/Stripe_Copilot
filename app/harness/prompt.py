@@ -1,8 +1,8 @@
 """
 Prompt assembly — the fixed order every request is built in.
 
-    [static system prompt]  role, conduct, the never-do list, active policies
-    [tool definitions]      (empty until tools arrive)
+    [static system prompt]  role, conduct, the never-do list, active policies, skill index
+    [tool definitions]      registered tools, in registration order
     [customer block]        profile + memory, rendered once at SessionStart
     [working memory]        the session's messages, append-only
 
@@ -15,11 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.database import CUSTOMER_PROFILE_FIELDS
+
 ROLE = """You are the Stripe AI Sales Agent. You talk directly with Stripe's customers and prospects: you answer their questions about Stripe products, understand what their business needs, recommend the products that fit, and bring in a human specialist when the conversation calls for one.
 
 Speak as a knowledgeable, honest salesperson would: concrete, warm, brief. Prefer a clear recommendation over a list of options. Ask a clarifying question when a request could reasonably mean different things; do not guess.
 
-You have no tools yet in this conversation: answer from what you know about Stripe, say plainly when you are not certain, and never invent product details, prices, or limits."""
+Work from facts: load the relevant skill before advising in its area, check the customer's profile before recommending, and look prices and products up with your tools rather than from memory. Never invent product details, prices, or limits; say plainly when something is not available to you."""
 
 CONDUCT = """Conduct:
 - Reply in the language the customer writes in.
@@ -50,12 +52,14 @@ def render_policies(policies: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def static_system_prompt(policies: list[dict[str, Any]]) -> str:
+def static_system_prompt(policies: list[dict[str, Any]], skills_section: str = "") -> str:
     """Everything that is identical for every customer and every session."""
     parts = [ROLE, CONDUCT, NEVER_DO]
     rendered = render_policies(policies)
     if rendered:
         parts.append(rendered)
+    if skills_section:
+        parts.append(skills_section)
     return "\n\n".join(parts)
 
 
@@ -67,25 +71,11 @@ def customer_block(profile: dict[str, Any] | None, product_usage: list[dict[str,
             "Nothing is known about them yet; learn about their business as you talk."
         )
 
-    def line_for(label: str, key: str) -> str | None:
-        value = profile.get(key)
-        return f"- {label}: {value}" if value not in (None, "") else None
-
     lines = [f"Customer: {profile.get('customer_name', 'unknown')} (id {profile.get('customer_id', '')})"]
     lines += [
-        s for s in (
-            line_for("Company stage", "company_stage"),
-            line_for("Industry", "industry"),
-            line_for("Business model", "business_model"),
-            line_for("Use case", "use_case"),
-            line_for("Country", "country"),
-            line_for("Annual payment volume (USD)", "annual_payment_volume"),
-            line_for("Monthly transactions", "monthly_transactions"),
-            line_for("Average order value (USD)", "average_order_value"),
-            line_for("Primary pain point", "primary_pain_point"),
-            line_for("Fraud risk level", "fraud_risk_level"),
-            line_for("Integration maturity", "integration_maturity"),
-        ) if s
+        f"- {label}: {profile[key]}"
+        for key, label in CUSTOMER_PROFILE_FIELDS.items()
+        if profile.get(key) not in (None, "")
     ]
     if product_usage:
         lines.append("Stripe products in use:")
