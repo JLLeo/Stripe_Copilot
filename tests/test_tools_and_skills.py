@@ -115,7 +115,7 @@ def test_skills_carry_no_tool_allowlist_and_definitions_are_stable(client, provi
     a, b = provider.requests
     assert json.dumps(a.tools, sort_keys=True) == json.dumps(b.tools, sort_keys=True)
     names = [t["function"]["name"] for t in a.tools]
-    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff"]
+    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff", "ask_customer"]
     skill_tool = a.tools[0]["function"]
     assert sorted(skill_tool["parameters"]["properties"]["name"]["enum"]) == sorted(PRODUCT_SKILLS | POLICY_SKILLS)
     assert "allowed" not in json.dumps(a.tools)

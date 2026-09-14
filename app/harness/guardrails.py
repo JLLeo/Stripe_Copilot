@@ -1,20 +1,26 @@
 """
 Guardrails — deterministic checks that attach to hooks.
 
-Each guardrail validates or constrains a tool call the model already chose;
-none selects a tool for it (ADR 0001). This module holds the ones every tool
-needs: a per-turn budget, a result size cap, and a per-session result cache.
+Each guardrail validates or constrains something the model already chose;
+none selects an action for it (ADR 0001). This module holds the ones every
+tool needs — a per-turn budget, a result size cap, a per-session result
+cache — and the two checks every final reply passes before the customer sees
+it: no unfilled placeholders, no Internal Knowledge.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
-from app.harness.hooks import Deny, HookEvent, HookRegistry, Replace, ToolUseContext
+from app.harness.hooks import Deny, HookEvent, HookRegistry, Replace, StopContext, ToolUseContext
 from app.harness.tools import ToolResult
+from app.paths import KNOWLEDGE_BASE_DIR
 
 TRUNCATION_NOTE = "\n\n[truncated: showing {shown} of {total} characters]"
 
@@ -137,12 +143,108 @@ def make_tool_cache_hooks(cache: ToolCache):
 
 
 # ---------------------------------------------------------------------------
+# anti_placeholder — Stop
+# ---------------------------------------------------------------------------
+# A bracketed or angled token is a fill-in-the-blank when one of these words appears in it
+# — [Customer Name], [Sales Rep], <insert date> — and a citation like [Stripe Checkout] or a
+# markdown link like [pricing](url) otherwise. "Link" is left out: Stripe Link is a product.
+_PLACEHOLDER_WORDS = (
+    r"your|customer|client|company|merchant|organi[sz]ation|insert|name|date|amount|value|placeholder|"
+    r"contact|email|phone|address|signature|title|team|rep|representative|executive|recipient|sender|"
+    r"business|product|url|number|region|country|currency|volume|rate|percentage|price|fee|x{1,3}|tbd|todo"
+)
+_HAS_PLACEHOLDER_WORD = rf"(?=[^\]>\n]{{0,60}}\b(?:{_PLACEHOLDER_WORDS})\b)"
+_PLACEHOLDER_PATTERNS = tuple(re.compile(p, re.IGNORECASE) for p in (
+    rf"\[{_HAS_PLACEHOLDER_WORD}[^\]\n]{{1,60}}\](?!\()",  # [Customer Name] — but not [text](link)
+    rf"<{_HAS_PLACEHOLDER_WORD}[^>\n]{{1,60}}>",  # <your company>
+    r"\{\{[^}\n]{1,60}\}\}",  # {{ template }}
+    r"\b(?:TBD|TODO|XXX)\b",
+    r"\[\s*\]|_{3,}",  # an empty blank, or a line to fill in
+))
+
+
+def find_placeholders(text: str) -> list[str]:
+    return [m.group(0) for p in _PLACEHOLDER_PATTERNS for m in p.finditer(text)]
+
+
+def anti_placeholder(ctx: StopContext) -> Deny | None:
+    found = find_placeholders(ctx.reply)
+    if not found:
+        return None
+    return Deny(
+        "your reply contains placeholders that would reach the customer unfilled: "
+        + ", ".join(dict.fromkeys(found))
+        + ". Rewrite the whole reply with real values, or leave those parts out. Do not mention this note."
+    )
+
+
+# ---------------------------------------------------------------------------
+# internal_canary — Stop
+# ---------------------------------------------------------------------------
+# Markers that only Internal Knowledge contains. Curated phrases plus, derived at first use
+# from the non-public documents, their section headings (three words or more) and their
+# percentage ranges — minus anything a public document also says, since public and internal
+# documents share their section structure and an honest answer must never be sent back.
+# This is the one place outside ingestion that opens those files, and nothing read here is
+# ever sent to a model: it is a blocklist (ADR 0003).
+_CURATED_MARKERS = (
+    "INTERNAL ONLY", "DO NOT SHARE WITH CUSTOMERS", "internal_mock", "mock_policy", "Mock Internal",
+    "Internal Guidelines", "Internal Reference", "Internal Use", "Discount Ranges", "Approval Workflow",
+    "VP of Sales", "CRO approval", "CRO-level", "deal desk tool", "BANT", "price matching",
+)
+_PERCENT_RANGE = re.compile(r"\b\d+(?:\.\d+)?%?\s?-\s?\d+(?:\.\d+)?%\+?|\b\d+(?:\.\d+)?%\+")
+
+
+def _present(marker: str, lowered: str) -> bool:
+    return re.search(rf"(?<![a-z0-9]){re.escape(marker.lower())}(?![a-z0-9])", lowered) is not None
+
+
+@lru_cache(maxsize=1)
+def internal_markers(knowledge_base: Path = KNOWLEDGE_BASE_DIR) -> tuple[str, ...]:
+    """The markers exclusive to Internal Knowledge: a phrase any public document uses is not a canary."""
+    candidates: dict[str, None] = dict.fromkeys(_CURATED_MARKERS)
+    public: list[str] = []
+    for path in sorted(knowledge_base.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        level = re.search(r"^Access Level:\s*(.+)$", text, re.MULTILINE)
+        if level and level.group(1).strip().lower() == "public":
+            public.append(text.lower())
+            continue
+        for heading in re.findall(r"^###\s+(.+)$", text, re.MULTILINE):
+            heading = re.sub(r"\s*\([^)]*\)\s*$", "", heading).strip()  # "(Mock)", "(Internal Reference)"
+            if len(heading.split()) >= 3:
+                candidates.setdefault(heading, None)
+        for pct in _PERCENT_RANGE.findall(text):
+            candidates.setdefault(pct.strip(), None)
+    return tuple(m for m in candidates if not any(_present(m, doc) for doc in public))
+
+
+def leaks(text: str) -> list[str]:
+    """Every internal marker present in `text` — the zero-leak check tests and evaluation reuse."""
+    lowered = text.lower()
+    return [m for m in internal_markers() if _present(m, lowered)]
+
+
+def internal_canary(ctx: StopContext) -> Deny | None:
+    found = leaks(ctx.reply)
+    if not found:
+        return None
+    return Deny(
+        "your reply contains material the customer must not see (" + ", ".join(found) + "). "
+        "Rewrite it without those figures, headings or phrases; offer to bring in the right team instead. "
+        "Do not mention this note."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Wiring
 # ---------------------------------------------------------------------------
 def register_defaults(hooks: HookRegistry, *, tool_round_budget: int, result_cap_chars: int, cache: ToolCache) -> None:
-    """The guardrails every tool gets, in the order they run."""
+    """The guardrails every tool gets, in the order they run, and the checks every reply gets."""
     lookup, store = make_tool_cache_hooks(cache)
     hooks.register(HookEvent.PRE_TOOL_USE, make_turn_budget(tool_round_budget))
     hooks.register(HookEvent.PRE_TOOL_USE, lookup)
     hooks.register(HookEvent.POST_TOOL_USE, make_result_cap(result_cap_chars))
     hooks.register(HookEvent.POST_TOOL_USE, store)
+    hooks.register(HookEvent.STOP, anti_placeholder)
+    hooks.register(HookEvent.STOP, internal_canary)

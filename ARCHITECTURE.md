@@ -41,7 +41,7 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
 `Harness.run_turn(session_id, customer_id, message)` is a generator of `TurnEvent`s
 (`thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`,
 `subagent_started`, `subagent_tool_call`, `subagent_finished`, `handoff_pending`,
-`text_delta`, `done`, `error`). The transport layer forwards them as Server-Sent Events or, for the
+`ask_customer`, `text_delta`, `done`, `error`). The transport layer forwards them as Server-Sent Events or, for the
 synchronous endpoint, keeps only the last one.
 
 1. **Session binding.** An unseen `session_id` triggers **SessionStart**: the Customer
@@ -51,9 +51,9 @@ synchronous endpoint, keeps only the last one.
    ([ADR 0005](docs/adr/0005-append-only-prompt-prefix.md)). A session with no
    `customer_id` is a Prospect; its block says so.
 2. **Request assembly** in the fixed order — see below.
-3. **Completion.** The Provider streams; text deltas are forwarded immediately, the
-   first reasoning delta is announced once as `thinking`, and the final `Completed`
-   event carries usage and any tool calls.
+3. **Completion.** The Provider streams; the first reasoning delta is announced once
+   as `thinking`, text deltas are **held**, and the final `Completed` event carries usage
+   and any tool calls. Held text is released only once the Stop hooks approve it (step 5).
 4. **Tool rounds.** While the reply carries tool calls, each call goes through the
    `PreToolUse` hooks (allow, deny with feedback, replace with a cached result, or
    pause), the tool runs, the `PostToolUse` hooks may rewrite the result, and a `tool`
@@ -65,11 +65,18 @@ synchronous endpoint, keeps only the last one.
    call: the remaining calls of the round get a "not run" result, the messages so far are
    appended, and `done` carries the question for the customer; the paused call's result
    arrives with their answer (see Handoff).
-5. **Working memory.** The customer message and every assistant and tool message of
+5. **Stop hooks.** When the reply carries no tool calls, `anti_placeholder` and
+   `internal_canary` inspect it. A `Deny` sends the draft back to the model — draft and
+   feedback are appended to the request as an assistant and a user message, but not to
+   working memory — and the loop runs again; after two rewrites a fixed safe reply
+   replaces the draft. Only an approved (or safe) reply is streamed, in one burst. Text the
+   model wrote beside a handoff proposal is checked the same way when the turn pauses; if
+   it fails, the harness's own proposal wording stands in.
+6. **Working memory.** The customer message and every assistant and tool message of
    the turn (assistant rows with their `reasoning_content`, which DeepSeek requires
    back whenever `tools` are present) are appended as `messages` rows. Nothing is
    ever updated.
-6. **Metrics.** One `TurnRecord`: model, prompt/completion/reasoning tokens summed over
+7. **Metrics.** One `TurnRecord`: model, prompt/completion/reasoning tokens summed over
    the turn's rounds, `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, provider
    calls, tool rounds, tools called, skills loaded, hook outcomes, tool-cache hits,
    latency, error.
@@ -136,6 +143,7 @@ Results are compact JSON — they live in every later request of the session.
 | `search_knowledge(question, products[], topics[])` | the knowledge index (below) | `products` and `topics` are enums from the graph; results carry passages and sources; `meta.sources` feeds `source_extraction`. Its description says: use this first; hand multi-product, comparative or thin results to `research` |
 | `research(question)` | a Sub-agent (below) over `search_knowledge` | returns `{brief, sources, tool_calls, stopped_by_cap, gave_up}`; the documents the brief cites in `[Title]` form are its sources (a brief that cites nothing keeps everything it read); `meta.subagent` carries its metering |
 | `request_handoff(team, reason, evidence)` | `handoffs` (runtime) | never runs inside a turn: `handoff_confirmation` pauses first, and the customer's answer produces its result (see Handoff) |
+| `ask_customer(question, options[])` | — | writes its result at once and **ends the turn** (`EndTurn` on the result): the harness emits `ask_customer`, gives the round's other calls a "not run" result, and makes the question the reply; the customer's click is their next message. 2–5 distinct options, else feedback |
 
 ### Sub-agents — `subagent.py`, `app/tools/research.py`
 
@@ -181,7 +189,9 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
 - **PostToolUse** hooks may return a modified `ToolResult`. They run on served (cached)
   results as well as fresh ones, so `source_extraction` sees every search the model
   relied on; `tool_cache_store` skips results that came from the cache.
-- `Stop` and `SessionEnd` gain dispatchers with *#5* and *#10*.
+- **Stop** hooks receive the final reply and may `Deny(feedback)`; the first denial wins
+  and is recorded as `stop_denied` (and `stop_gave_up` when the rewrites run out).
+- `SessionEnd` gains its dispatcher with *#10*.
 
 | Guardrail | Hook | Rule |
 |---|---|---|
@@ -193,8 +203,11 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
 | `handoff_validity` | PreToolUse | `request_handoff` with an unknown team, empty evidence, or evidence that matches nothing the customer said (a passage, or ≥60% of its whole words) and names no actual profile value is denied with feedback — field names alone never count |
 | `enterprise_volume` | PreToolUse | a customer whose profile shows more than $10M annual payment volume can only be handed to Enterprise Sales; anything else is denied with feedback naming the rule |
 | `handoff_confirmation` | PreToolUse | every valid `request_handoff` creates a pending `handoffs` row and pauses the turn with `handoff_pending` |
+| `anti_placeholder` | Stop | a reply containing an unfilled placeholder — `[Customer Name]`, `[Insert …]`, `<your email>`, `{{ template }}`, `TBD` — is sent back; source citations like `[Stripe Checkout]` and markdown links are not placeholders |
+| `internal_canary` | Stop | a reply containing any marker of Internal Knowledge is sent back. Markers are a curated list ("INTERNAL ONLY", "Discount Ranges", "VP of Sales", …) plus, derived at first use from the non-public documents, their section headings of three words or more and their percentage ranges — minus anything a public document also says (public and internal documents share their section structure, and "buy-rates" or "do not share" appear in public text), so an honest answer is never sent back. `leaks(text)` exposes the same check for tests and evaluation; this is the one place outside ingestion that opens those files, and nothing read is ever sent to a model — it is a blocklist |
+| `clean_question` | PreToolUse | an `ask_customer` question or option that fails the two checks above is denied with feedback — the question is a reply the customer reads |
 
-Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `paused`, `hard_stop`.
+Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `paused`, `asked_customer`, `stop_denied`, `stop_gave_up`, `hard_stop`.
 
 ### Handoff — `app/tools/handoff.py`
 
@@ -386,7 +399,7 @@ accident and this is where a break shows first.
 
 ## Testing
 
-104 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~17 s. The app under test
+119 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~19 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -401,7 +414,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 
 | Ticket | Adds |
 |---|---|
-| #5 | `ask_customer`, `Stop` guardrails (`anti_placeholder`, `internal_canary`) |
 | #9 | prospect discovery and lead capture |
 | #10 | Customer Memory and Reflection |
 | #11 | attachments, tool-result clearing, compaction with hysteresis |

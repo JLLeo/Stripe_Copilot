@@ -38,6 +38,20 @@ class ToolContext:
 
 
 @dataclass(frozen=True)
+class EndTurn:
+    """A tool result that also ends the turn: the customer must answer before the model goes on.
+
+    Placed on `ToolResult.meta["end_turn"]`. The tool's result is written like any other,
+    so the transcript stays valid; the harness stops dispatching, emits `event` with
+    `data`, and makes `reply` what the customer sees.
+    """
+
+    event: str
+    data: dict[str, Any]
+    reply: str
+
+
+@dataclass(frozen=True)
 class ToolResult:
     content: str  # what the model reads; JSON for structured results
     is_error: bool = False

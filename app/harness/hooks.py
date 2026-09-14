@@ -11,10 +11,11 @@ Claude Code's:
                     reads), Replace (serve a result without running the tool), or
                     Pause (stop the turn until the customer confirms)
     POST_TOOL_USE   after a tool returns: return a modified result, or None
-    STOP            the model is done: validate the reply or send it back
+    STOP            the model is done: validate the reply (Deny sends it back to
+                    the model with feedback, before the customer sees a word of it)
     SESSION_END     the customer ends the conversation: reflection
 
-STOP and SESSION_END gain their dispatchers with the tickets that need them.
+SESSION_END gains its dispatcher with the ticket that needs it.
 """
 
 from __future__ import annotations
@@ -65,6 +66,13 @@ class ToolUseContext:
     arguments: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class StopContext:
+    turn: TurnState
+    reply: str  # the final text the model wants to send
+    attempt: int  # 0 for the first draft, then one per rewrite
+
+
 # ---------------------------------------------------------------------------
 # PreToolUse outcomes
 # ---------------------------------------------------------------------------
@@ -97,6 +105,7 @@ PreToolUseOutcome = Allow | Deny | Replace | Pause
 SessionStartHook = Callable[[SessionStartContext], str | None]
 PreToolUseHook = Callable[[ToolUseContext], PreToolUseOutcome | None]
 PostToolUseHook = Callable[[ToolUseContext, ToolResult], ToolResult | None]
+StopHook = Callable[[StopContext], "Deny | None"]
 
 
 @dataclass(frozen=True)
@@ -140,3 +149,11 @@ class HookRegistry:
             if modified is not None:
                 result = modified
         return result
+
+    def run_stop(self, ctx: StopContext) -> Decision:
+        """The first Stop hook that denies wins; the feedback goes back to the model for a rewrite."""
+        for hook in self._hooks[HookEvent.STOP]:
+            outcome = hook(ctx)
+            if isinstance(outcome, Deny):
+                return Decision(outcome, hook=getattr(hook, "__name__", type(hook).__name__))
+        return Decision(Allow())

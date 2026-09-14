@@ -29,6 +29,7 @@ from app.harness.hooks import (
     Pause,
     Replace,
     SessionStartContext,
+    StopContext,
     ToolUseContext,
     TurnState,
 )
@@ -44,7 +45,7 @@ from app.harness.provider import (
 )
 from app.harness.skills import Skill, load_skills, register_skill_tool, skills_index
 from app.harness.subagent import SubagentMetering
-from app.harness.tools import ToolContext, ToolRegistry, ToolResult
+from app.harness.tools import EndTurn, ToolContext, ToolRegistry, ToolResult
 from app.metrics import TurnRecord, record_turn
 from app.paths import SKILLS_DIR
 from app.retrieval.index import DEFAULT_MILVUS_URI, KnowledgeIndex
@@ -58,6 +59,11 @@ HARD_STOP_REPLY = (
     "I wasn't able to finish checking everything for that. "
     "Here is what I can say so far — and I'm happy to pick up where I left off."
 )
+SAFE_REPLY = (
+    "I want to give you an accurate answer, and my draft wasn't right. "
+    "Could you tell me a little more about what you need? I can also bring in a colleague who can help directly."
+)
+MAX_REWRITES = 2  # Stop-hook rewrites before the safe reply replaces the draft
 
 
 class UnknownCustomer(LookupError):
@@ -110,10 +116,18 @@ class Paused:
 
 
 @dataclass(frozen=True)
+class Ended:
+    """A tool result that also ends the turn (a question for the customer); the result is already written."""
+
+    message: dict[str, Any]
+    end: EndTurn
+
+
+@dataclass(frozen=True)
 class TurnEvent:
     """What the transport layer forwards to the customer's client."""
 
-    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | done | error
+    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | ask_customer | done | error
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -254,6 +268,8 @@ class Harness:
         books = _Books(model=self.config.main_model)
         announced_thinking = False
         paused: Paused | None = None
+        ended: Ended | None = None
+        rewrites = 0
 
         def book(error: str | None = None) -> None:
             record_turn(TurnRecord(
@@ -283,9 +299,12 @@ class Harness:
                 asked_for_text = turn.tools_exhausted
                 completion: Completion | None = None
                 books.provider_calls += 1
+                # Text is held back until the Stop hooks have approved it: a rejected draft is
+                # rewritten, and the customer never sees a word of it.
+                held: list[TurnEvent] = []
                 for event in self.provider.complete(request):
                     if isinstance(event, TextDelta):
-                        yield TurnEvent("text_delta", {"text": event.text})
+                        held.append(TurnEvent("text_delta", {"text": event.text}))
                     elif isinstance(event, ReasoningDelta) and not announced_thinking:
                         announced_thinking = True
                         yield TurnEvent("thinking", {})
@@ -304,6 +323,27 @@ class Harness:
                         reasoning_content=completion.reasoning_content,
                         finish_reason="stop", usage=completion.usage, model=completion.model,
                     )
+                    held = [TurnEvent("text_delta", {"text": completion.content})]
+
+                if not completion.tool_calls:
+                    decision = self.hooks.run_stop(StopContext(turn=turn, reply=completion.content, attempt=rewrites))
+                    if isinstance(decision.outcome, Deny):
+                        books.outcome("stop_denied")
+                        yield TurnEvent("hook_blocked", {"call_id": "", "tool": "reply", "hook": decision.hook})
+                        if rewrites < MAX_REWRITES:
+                            # Send the draft back with the feedback; neither enters working memory.
+                            rewrites += 1
+                            messages.append(completion.to_message())
+                            messages.append({"role": "user", "content": f"[Stop hook {decision.hook}] {decision.outcome.feedback}"})
+                            continue
+                        books.outcome("stop_gave_up")
+                        completion = Completion(
+                            content=SAFE_REPLY, reasoning_content=completion.reasoning_content,
+                            finish_reason="stop", usage=completion.usage, model=completion.model,
+                        )
+                        held = [TurnEvent("text_delta", {"text": SAFE_REPLY})]
+                    yield from held
+
                 assistant = completion.to_message()
                 messages.append(assistant)
                 new_messages.append(assistant)
@@ -312,9 +352,10 @@ class Harness:
 
                 turn.tool_rounds += 1
                 for call in completion.tool_calls:
-                    if paused is not None:
-                        # The turn is waiting for the customer; nothing else in this round runs.
-                        skipped = _tool_message(call, "Not run: the turn paused for the customer's confirmation.")
+                    if paused is not None or ended is not None:
+                        # The turn is over to the customer; nothing else in this round runs.
+                        why = "paused for the customer's confirmation" if paused else "ended with a question for the customer"
+                        skipped = _tool_message(call, f"Not run: the turn {why}.")
                         messages.append(skipped)
                         new_messages.append(skipped)
                         continue
@@ -322,9 +363,14 @@ class Harness:
                     if isinstance(outcome, Paused):
                         paused = outcome  # its tool result arrives when the customer answers
                         continue
+                    if isinstance(outcome, Ended):
+                        ended = outcome
+                        messages.append(outcome.message)
+                        new_messages.append(outcome.message)
+                        continue
                     messages.append(outcome)
                     new_messages.append(outcome)
-                if paused is not None:
+                if paused is not None or ended is not None:
                     break
         except GeneratorExit:
             # The customer went away mid-reply. The tokens were still spent; keep the books.
@@ -339,25 +385,40 @@ class Harness:
             return
 
         database.append_messages(session_id, new_messages)
+        if paused:
+            # When the model asked the customer in its own words alongside the tool call, use those —
+            # after the same checks as any reply; if they fail, the harness's own proposal stands in.
+            reply = completion.content.strip() or paused.reply
+            if reply != paused.reply:
+                decision = self.hooks.run_stop(StopContext(turn=turn, reply=reply, attempt=0))
+                if isinstance(decision.outcome, Deny):
+                    books.outcome("stop_denied")
+                    yield TurnEvent("hook_blocked", {"call_id": "", "tool": "reply", "hook": decision.hook})
+                    reply = paused.reply
+        elif ended:
+            reply = ended.end.reply
+        else:
+            reply = completion.content
         book()
         yield TurnEvent("done", {
             "turn_id": turn_id,
             "session_id": session_id,
-            # When the model asked the customer in its own words alongside the tool call, use those.
-            "reply": (completion.content.strip() or paused.reply) if paused else completion.content,
+            "reply": reply,
             "usage": asdict(books.usage),
             "latency_ms": int((time.perf_counter() - started) * 1000),
             "tool_rounds": turn.tool_rounds,
             "sources": turn.sources,
             "pending_handoff": paused.data if paused else None,
+            "ask_customer": ended.end.data if ended else None,
         })
 
     # ------------------------------------------------------------------
-    def _run_tool(self, turn: TurnState, call: ToolCall, books: _Books) -> Generator[TurnEvent, None, "dict[str, Any] | Paused"]:
+    def _run_tool(self, turn: TurnState, call: ToolCall, books: _Books) -> Generator[TurnEvent, None, "dict[str, Any] | Paused | Ended"]:
         """Dispatch one tool call through the hooks, yielding events as they happen.
 
         Returns the tool message to append — or a `Paused` marker when a hook stopped the
-        turn to ask the customer, in which case the tool result arrives with their answer.
+        turn to ask the customer (the tool result arrives with their answer), or an `Ended`
+        marker when the tool itself ended the turn with a question (its result is included).
         """
         yield TurnEvent("tool_call", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
         books.tools_called.append(call.name)
@@ -404,6 +465,10 @@ class Harness:
         if skill := result.meta.get("skill"):
             books.skills_loaded.append(skill)
             yield TurnEvent("skill_loaded", {"call_id": call.id, "name": skill})
+        elif isinstance(end := result.meta.get("end_turn"), EndTurn):
+            books.outcome("asked_customer" if end.event == "ask_customer" else end.event)
+            yield TurnEvent(end.event, {"call_id": call.id, **end.data})
+            return Ended(message=_tool_message(call, result.content), end=end)
         else:
             yield TurnEvent("tool_result", {
                 "call_id": call.id, "name": call.name, "chars": len(result.content),

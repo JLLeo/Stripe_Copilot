@@ -7,10 +7,12 @@ only builds the request, moves bytes, and guards the edges.
 This branch is a ground-up rebuild in progress. Today a customer signs in, asks a
 question, and watches the agent load the relevant skill, search Stripe's public
 documentation — or hand a hard question to a research sub-agent — look up the profile,
-catalogue or pricing, and answer with sources; when the matter needs a person, it proposes
-a handoff and waits for the customer's yes. Every step streamed, every turn metered.
-Clarifying questions, prospects, and memory land ticket by ticket
-([issues #5–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
+catalogue or pricing, and answer with sources; when a request is ambiguous it asks a
+clarifying question with options; when the matter needs a person, it proposes a handoff and
+waits for the customer's yes; and no reply reaches the customer with a placeholder or a line
+from an internal document. Every step streamed, every turn metered. Prospects, memory, and
+long-conversation handling land ticket by ticket
+([issues #9–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
 
 ---
 
@@ -29,12 +31,13 @@ customer message  ─►  /sales-agent/stream
              │  4. tool calls?             │   PreToolUse → run → PostToolUse,
              │     └─ round again          │   Skill / search_knowledge / research / request_handoff / …
              │     └─ or pause             │   a handoff waits for the customer's answer
-             │  5. append every message    │   working memory
-             │  6. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
+             │  5. Stop hooks on the reply │   anti_placeholder, internal_canary → rewrite
+             │  6. append every message    │   working memory
+             │  7. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
              └─────────────────────────────┘
                           │
                           ▼
-   SSE: thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending)* · text_delta* · done | error
+   SSE: thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer)* · text_delta* · done | error
 ```
 
 Every request is built in the same order — static system prompt, tool definitions
@@ -62,7 +65,7 @@ stripe-sales-copilot/
 │   │   ├── tools.py          # Tool = function + JSON schema; registry; argument checks
 │   │   ├── skills.py         # SKILL.md loader + the Skill tool
 │   │   ├── hooks.py          # Hook events; SessionStart / PreToolUse / PostToolUse dispatch
-│   │   ├── guardrails.py     # turn_budget, result_cap, tool cache
+│   │   ├── guardrails.py     # turn_budget, result_cap, tool cache, anti_placeholder, internal_canary, leaks()
 │   │   ├── subagent.py       # Bounded model loop with its own context → a Brief
 │   │   └── core.py           # Harness.run_turn — the loop with tool rounds
 │   ├── retrieval/
@@ -77,7 +80,8 @@ stripe-sales-copilot/
 │   │   ├── catalog.py        # list_products(group?), get_pricing(product)
 │   │   ├── knowledge.py      # search_knowledge(question, products[], topics[]) + source_extraction
 │   │   ├── research.py       # research(question): the sub-agent over search_knowledge on deepseek-flash
-│   │   └── handoff.py        # request_handoff + its three guardrails, the seven Teams, confirm/decline
+│   │   ├── handoff.py        # request_handoff + its three guardrails, the seven Teams, confirm/decline
+│   │   └── clarify.py        # ask_customer(question, options[]) + clean_question — ends the turn with clickable options
 │   └── static/index.html     # Customer chat UI
 ├── data/
 │   ├── seed.db               # Tracked, read-only: customers, products, usage, policies
@@ -86,7 +90,7 @@ stripe-sales-copilot/
 ├── skills/<name>/SKILL.md    # 10 skills: 7 product, 3 policy (pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 104 tests, no network, ~17s (builds a real Milvus Lite fixture)
+├── tests/                    # 119 tests, no network, ~19s (builds a real Milvus Lite fixture)
 ├── docs/adr/                 # Architecture decision records
 ├── CONTEXT.md                # Domain glossary
 └── ARCHITECTURE.md
@@ -127,7 +131,7 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash)
 | `GET` | `/` | Customer chat UI |
 | `GET` | `/api/customers` | Customers for the sign-in selector |
 | `POST` | `/sales-agent/chat` | One turn, JSON reply with `sources`. `404` unknown customer, `409` session already bound to another customer |
-| `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped to ask the customer |
+| `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
 | `POST` | `/sales-agent/confirm-handoff` | `{session_id, accept, handoff_id?}` — the customer's answer to a pending handoff; the agent's follow-up streams back as SSE. `404` when nothing is pending, `409` for a stale proposal |
 | `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, calls per tool |
 
@@ -143,7 +147,7 @@ customer on first contact and refuses to switch.
 ## Testing
 
 ```bash
-pytest            # 104 tests in ~17s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 119 tests in ~19s; no model calls; temp runtime DB and a temp Milvus Lite index
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
@@ -158,6 +162,7 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_knowledge_search.py` | A fixture knowledge base indexed through the fake embedder: public-only in both collections, chunking, vocabulary from the graph, one-hop expansion, keyword fallback, filter expression, fused ranking, the `search_knowledge` tool, `sources` on `done` |
 | `tests/test_research.py` | The research sub-agent: its own model and single tool, none of the main conversation in its requests, only the brief in working memory, the round cap and forced brief, cited-only sources, live progress events, separate metering (and none for a cached brief), tool descriptions that steer |
 | `tests/test_handoff.py` | Handoff: the seven Teams and the policy register mapping, unknown team / untraceable evidence denied with feedback, the $10M rule, pause → confirm → `handoffs` row → follow-up, decline without a record, a new message resolving a dangling proposal, other calls in the paused round not run, the policy skills free of internal text |
+| `tests/test_clarify_and_stop.py` | `ask_customer` ends the turn with options and the choice is the next message; 2–5 distinct options; a question that would leak or leave blanks is denied with feedback; Stop hook rewrites placeholders and internal leaks before anything streams, gives up after two rewrites with a safe reply, and checks the text beside a handoff proposal; citations, links and sign-offs handled; `leaks()` finds curated and document-derived markers and nothing a public document says |
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
 | `tests/test_api_customers.py` | Customer list served through the shared connection |
@@ -181,6 +186,7 @@ them. Adding a behaviour is adding a file.
 | `search_knowledge(question, products[], topics[])` | passages from Stripe's public documentation with their sources. `products` and `topics` are enums from the knowledge graph — the model does the entity linking, the graph widens the search one hop, and dense + BM25 legs run with the same filter and are fused |
 | `research(question)` | a **sub-agent**: a bounded loop on `deepseek-flash` with `search_knowledge` as its only tool, up to 3 rounds, in its own context. Only its cited brief comes back, and the customer watches each search as it happens. For questions that span products, need a comparison, or came back thin from one search |
 | `request_handoff(team, reason, evidence)` | propose handing the conversation to one of seven human **Teams**. Guardrails check the team, that the evidence is the customer's own words or a profile fact, and that a customer above $10M a year goes to Enterprise Sales; then the turn **pauses** and the customer confirms or declines in the UI. Only a confirmation records a handoff |
+| `ask_customer(question, options[])` | a clarifying question with 2–5 clickable options when a request could mean different things. The turn ends with the question; the option the customer clicks is simply their next message |
 
 Every call passes through the hooks: `turn_budget` (8 tool rounds per turn; the ninth
 is denied with feedback, the next request forces a text answer, and a model that still
@@ -189,8 +195,16 @@ served from a TTL cache), `handoff_validity` and `enterprise_volume` (deny a han
 with feedback), `handoff_confirmation` (pause for the customer), `result_cap` (results
 over ~1.5K tokens are truncated at a boundary with a note), `tool_cache_store`,
 `source_extraction` (sources a search cited are collected on the turn and returned on
-`done`). An existing `data/runtime.db` is upgraded in place on startup when the metrics
-table gains columns.
+`done`). Every final reply then passes the **Stop hooks** before a word of it is streamed:
+`anti_placeholder` (unfilled `[Customer Name]`, `{{ }}`, `<your …>`, TBD) and
+`internal_canary` (markers only Internal Knowledge contains — curated phrases plus the
+headings and percentage ranges of the non-public documents, minus anything a public document
+also says). A rejected draft goes back to the model with the feedback for a rewrite, up to
+twice; after that a fixed safe reply is sent. The draft never enters working memory and the
+customer never sees it. The same checks guard the two other things the customer reads: a
+clarifying question and its options (`clean_question`, denied with feedback) and the text the
+model writes beside a handoff proposal (the harness's own proposal stands in). An existing
+`data/runtime.db` is upgraded in place on startup when the metrics table gains columns.
 
 ## Handoff
 
@@ -236,6 +250,11 @@ narrows the search and a false match would hide the right documents.
 | Latency | 14.5 s | 18.3 s |
 
 Before tools (turn 2 of a plain two-turn chat): 1,024 of 1,169 prompt tokens from cache, ~3 s.
+
+A prospect asked "How much would Stripe cost us?": the model loaded
+`pricing_conversation`, fetched the public card rates, then asked — online, in person,
+subscriptions, a platform, or not sure — with five clickable options; "Both" came back as
+the next message and it answered with online and Terminal pricing side by side.
 
 A $43M customer asked for "a better rate than 2.9%": the model loaded
 `pricing_conversation`, checked the profile, proposed **Enterprise Sales** (not Deal Desk —

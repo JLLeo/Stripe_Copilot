@@ -68,6 +68,9 @@
   .handoff .d { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
   .handoff .btns { display: flex; gap: 8px; }
   .handoff.resolved { opacity: .6; }
+  .options { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .options button { border-radius: 999px; padding: 6px 14px; }
+  .options.used button { opacity: .5; }
   .status { color: var(--muted); font-size: 13px; font-style: italic; }
   .status::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent-2); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .2; } }
@@ -144,7 +147,7 @@
     document.querySelector(".empty")?.remove();
     const wrap = document.createElement("div");
     wrap.className = "msg " + role;
-    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="handoff-slot"></div><div class="sources"></div><div class="meta"></div></div>`;
+    wrap.innerHTML = `<div class="who">${role === "agent" ? "S" : "You"}</div><div><div class="activity"></div><div class="bubble"></div><div class="options"></div><div class="handoff-slot"></div><div class="sources"></div><div class="meta"></div></div>`;
     wrap.querySelector(".bubble").textContent = text || "";
     thread.appendChild(wrap);
     scroll();
@@ -185,6 +188,19 @@
     meta.innerHTML = [done.latency_ms != null ? (done.latency_ms / 1000).toFixed(1) + "s" : "", u.prompt_tokens != null ? `${u.prompt_tokens}→${u.completion_tokens} tokens` : "", cache]
       .concat(done.tool_rounds ? [`${done.tool_rounds} tool round${done.tool_rounds > 1 ? "s" : ""}`] : [])
       .filter(Boolean).map((t) => `<span>${escapeHtml(t)}</span>`).join("");
+  }
+
+  // --- clarifying question: the chosen option is the customer's next message ----
+  function offerOptions(wrap, asked) {
+    const box = wrap.querySelector(".options");
+    box.innerHTML = "";
+    for (const opt of asked.options || []) {
+      const b = document.createElement("button");
+      b.textContent = opt;
+      b.addEventListener("click", () => { if (state.busy) return; box.classList.add("used"); for (const x of box.querySelectorAll("button")) x.disabled = true; ask(opt); });
+      box.appendChild(b);
+    }
+    scroll();
   }
 
   // --- handoff confirmation ----------------------------------------------
@@ -276,13 +292,14 @@
           else if (event === "tool_call") { pending[data.call_id] = addActivity(reply, "tool", data.name, shortArgs(data.arguments)); setStatus(reply, data.name === "Skill" ? "loading skill" : "looking things up"); }
           else if (event === "skill_loaded") { const row = pending[data.call_id]; if (row) { row.querySelector(".k").textContent = "Skill"; row.querySelector(".args").textContent = data.name; row.querySelector(".r").textContent = "loaded"; } }
           else if (event === "tool_result") { const row = pending[data.call_id]; if (row) { const r = row.querySelector(".r"); r.textContent = data.is_error ? "error" : `${data.chars} chars`; if (data.cached) r.classList.add("cached"); if (data.is_error) row.classList.add("error"); } }
-          else if (event === "hook_blocked") { const row = pending[data.call_id]; if (row) { row.classList.add("blocked"); row.querySelector(".r").textContent = `blocked by ${data.hook}`; } }
+          else if (event === "hook_blocked") { if (data.tool === "reply") { addActivity(reply, "blocked", "reply", "", { text: `held back by ${data.hook}, rewriting` }); setStatus(reply, "rewriting"); } else { const row = pending[data.call_id]; if (row) { row.classList.add("blocked"); row.querySelector(".r").textContent = `blocked by ${data.hook}`; } } }
+          else if (event === "ask_customer") { setStatus(reply, ""); }
           else if (event === "subagent_started") { addActivity(reply, "sub", data.name, "started", { text: "" }); setStatus(reply, `${data.name} in progress`); }
           else if (event === "subagent_tool_call") { addActivity(reply, "sub", `${data.name} › ${data.tool}`, shortArgs(data.arguments)); }
           else if (event === "subagent_finished") { addActivity(reply, "sub", data.name, `${data.tool_calls} tool call${data.tool_calls === 1 ? "" : "s"}`, { text: data.gave_up ? "no brief (budget reached)" : data.stopped_by_cap ? "brief (budget reached)" : "brief" }); }
           else if (event === "text_delta") { if (!bubble.textContent) setStatus(reply, ""); bubble.textContent += data.text || ""; scroll(); }
           else if (event === "handoff_pending") { setStatus(reply, ""); }
-          else if (event === "done") { if (!bubble.textContent && data.reply) bubble.textContent = data.reply; finish(reply, data); if (data.pending_handoff) offerHandoff(reply, data.pending_handoff); }
+          else if (event === "done") { if (!bubble.textContent && data.reply) bubble.textContent = data.reply; finish(reply, data); if (data.pending_handoff) offerHandoff(reply, data.pending_handoff); if (data.ask_customer) offerOptions(reply, data.ask_customer); }
           else if (event === "error") { bubble.textContent = data.reply || "Something went wrong."; bubble.classList.add("error"); setStatus(reply, ""); }
         }
       }

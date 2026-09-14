@@ -222,4 +222,4 @@ def test_tool_descriptions_steer_search_first_and_research_for_hard_questions(cl
     tools = {t["function"]["name"]: t["function"]["description"] for t in provider.requests[0].tools}
     assert "research" in tools["search_knowledge"]
     assert "search_knowledge" in tools["research"] and "several products" in tools["research"].lower()
-    assert list(tools) == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff"]
+    assert list(tools) == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff", "ask_customer"]
