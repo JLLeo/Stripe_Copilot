@@ -63,15 +63,24 @@ def chat_ui():
 
 
 # ---------------------------------------------------------------------------
-# API: customers (sign-in-as selector)
+# API: customers (sign-in-as selector) — the first choice is to be a new prospect
 # ---------------------------------------------------------------------------
+NEW_PROSPECT = {"customer_id": None, "customer_name": "New prospect", "industry": None, "annual_payment_volume": None, "prospect": True}
+
+
 @app.get("/api/customers")
 def list_customers():
     rows = get_connection().execute(
         "SELECT customer_id, customer_name, industry, annual_payment_volume "
         "FROM customers ORDER BY customer_name"
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [NEW_PROSPECT, *({**dict(r), "prospect": False} for r in rows)]
+
+
+@app.get("/api/leads")
+def list_leads(limit: int = 50):
+    """What the agent learned from prospects, most recently updated first — for whoever follows up."""
+    return database.list_leads(limit)
 
 
 # ---------------------------------------------------------------------------

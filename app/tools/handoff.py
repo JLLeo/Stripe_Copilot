@@ -115,10 +115,10 @@ def handoff_validity(ctx: ToolUseContext) -> Deny | None:
 
 
 def enterprise_volume(ctx: ToolUseContext) -> Deny | None:
-    if ctx.tool.name != "request_handoff" or not ctx.turn.customer_id:
+    """Above $10M a year, Enterprise Sales owns the relationship — from the profile, or from the Lead a prospect gave."""
+    if ctx.tool.name != "request_handoff":
         return None
-    profile = database.get_customer(ctx.turn.customer_id) or {}
-    volume = profile.get("annual_payment_volume") or 0
+    volume = database.annual_payment_volume(ctx.turn.session_id, ctx.turn.customer_id)
     if volume > ENTERPRISE_VOLUME and ctx.arguments.get("team") != "Enterprise Sales":
         return Deny(
             f"this customer's annual payment volume is ${volume:,}, above ${ENTERPRISE_VOLUME:,}: "

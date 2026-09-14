@@ -14,6 +14,7 @@ import pytest
 from app import database, main
 from app.harness.provider import Completion, Usage
 from tests.conftest import chat as _chat
+from tests.conftest import customers as _customers
 from tests.conftest import first_customer as _customer
 from tests.conftest import sse_events as _events
 
@@ -117,7 +118,7 @@ def test_unknown_customer_is_refused_not_downgraded(client, provider):
 
 def test_session_cannot_switch_customer(client, provider):
     provider.script("ok")
-    customers = client.get("/api/customers").json()
+    customers = _customers(client)
     _chat(client, "s1", "hi", customers[0]["customer_id"])
 
     r = _chat(client, "s1", "hi", customers[1]["customer_id"])

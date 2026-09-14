@@ -18,13 +18,14 @@ from app.harness.provider import Completion, ToolCall
 from app.harness.skills import SkillLoadError, load_skills
 from app.metrics import init_metrics, summary
 from tests.conftest import chat as _chat
+from tests.conftest import customers as _customers
 from tests.conftest import first_customer as _customer
 from tests.conftest import sse_events as _events
 
 pytestmark = pytest.mark.unit
 
 PRODUCT_SKILLS = {"payments", "billing", "connect", "tax", "fraud_protection", "terminal", "data"}
-POLICY_SKILLS = {"pricing_conversation", "security_compliance", "objection_handling"}
+POLICY_SKILLS = {"discovery", "pricing_conversation", "security_compliance", "objection_handling"}
 
 
 def calls(*specs: tuple[str, dict]) -> Completion:
@@ -115,7 +116,7 @@ def test_skills_carry_no_tool_allowlist_and_definitions_are_stable(client, provi
     a, b = provider.requests
     assert json.dumps(a.tools, sort_keys=True) == json.dumps(b.tools, sort_keys=True)
     names = [t["function"]["name"] for t in a.tools]
-    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff", "ask_customer"]
+    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff", "ask_customer", "capture_lead"]
     skill_tool = a.tools[0]["function"]
     assert sorted(skill_tool["parameters"]["properties"]["name"]["enum"]) == sorted(PRODUCT_SKILLS | POLICY_SKILLS)
     assert "allowed" not in json.dumps(a.tools)
@@ -140,7 +141,7 @@ def test_skill_frontmatter_is_validated_at_startup(tmp_path, provider):
 # =========================================================================
 def test_get_my_profile_returns_only_the_bound_customer(client, provider):
     provider.script(calls(("get_my_profile", {})), "ok")
-    customers = client.get("/api/customers").json()
+    customers = _customers(client)
     cid = customers[0]["customer_id"]
 
     _chat(client, "s1", "what do you know about us?", cid)

@@ -6,7 +6,7 @@ Seed database   (tracked, read-only)   data/seed.db
     Rebuild from data.xlsx with:  python scripts/build_seed_db.py
 
 Runtime database (ignored, read-write)  data/runtime.db
-    sessions, messages, handoffs, turn_metrics — everything the agent writes.
+    sessions, messages, handoffs, leads, turn_metrics — everything the agent writes.
     Created on first start.
 
 Callers never learn which table lives where: the runtime database is the main
@@ -45,6 +45,7 @@ RUNTIME_TABLES: tuple[str, ...] = (
     "sessions",
     "messages",
     "handoffs",
+    "leads",
     "turn_metrics",  # DDL lives in app.metrics.init_metrics; ownership is recorded here.
 )
 
@@ -160,6 +161,22 @@ def init_db() -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(session_id, status)")
+    # A Lead is what the agent learned about a Prospect: one row per session, refined as they talk.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS leads (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id                 TEXT NOT NULL UNIQUE REFERENCES sessions(session_id),
+            company                    TEXT,
+            business_model             TEXT,
+            annual_volume_usd          INTEGER,
+            timeline                   TEXT,
+            needs                      TEXT,
+            qualification_notes        TEXT,
+            recommended_products_json  TEXT,
+            created_at                 TEXT NOT NULL,
+            updated_at                 TEXT NOT NULL
+        )
+    """)
     conn.commit()
 
 
@@ -289,6 +306,67 @@ def count_handoffs(since: str, status: str = HANDOFF_CONFIRMED) -> int:
     return get_connection().execute(
         "SELECT COUNT(*) FROM handoffs WHERE status = ? AND resolved_at >= ?", (status, since)
     ).fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Leads
+# ---------------------------------------------------------------------------
+LEAD_FIELDS = ("company", "business_model", "annual_volume_usd", "timeline", "needs", "qualification_notes")
+
+
+def upsert_lead(session_id: str, fields: dict[str, Any], recommended_products: list[str] | None) -> dict[str, Any]:
+    """Write the session's Lead, keeping every earlier fact the new call does not restate."""
+    conn = get_connection()
+    now = _now()
+    values = {k: fields.get(k) for k in LEAD_FIELDS}
+    products = json.dumps(recommended_products) if recommended_products is not None else None
+    conn.execute(
+        """
+        INSERT INTO leads (session_id, company, business_model, annual_volume_usd, timeline, needs,
+                           qualification_notes, recommended_products_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            company                   = COALESCE(excluded.company, leads.company),
+            business_model            = COALESCE(excluded.business_model, leads.business_model),
+            annual_volume_usd         = COALESCE(excluded.annual_volume_usd, leads.annual_volume_usd),
+            timeline                  = COALESCE(excluded.timeline, leads.timeline),
+            needs                     = COALESCE(excluded.needs, leads.needs),
+            qualification_notes       = COALESCE(excluded.qualification_notes, leads.qualification_notes),
+            recommended_products_json = COALESCE(excluded.recommended_products_json, leads.recommended_products_json),
+            updated_at                = excluded.updated_at
+        """,
+        (session_id, *(values[k] for k in LEAD_FIELDS), products, now, now),
+    )
+    conn.commit()
+    return get_lead(session_id)  # type: ignore[return-value]
+
+
+def _lead_row(row: sqlite3.Row) -> dict[str, Any]:
+    lead = dict(row)
+    lead["recommended_products"] = json.loads(lead.pop("recommended_products_json") or "[]")
+    return lead
+
+
+def get_lead(session_id: str) -> dict[str, Any] | None:
+    row = get_connection().execute("SELECT * FROM leads WHERE session_id = ?", (session_id,)).fetchone()
+    return _lead_row(row) if row else None
+
+
+def list_leads(limit: int = 50) -> list[dict[str, Any]]:
+    """Most recently updated first — the queue for whoever follows up."""
+    rows = get_connection().execute("SELECT * FROM leads ORDER BY updated_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
+    return [_lead_row(r) for r in rows]
+
+
+def count_leads(since: str) -> int:
+    return get_connection().execute("SELECT COUNT(*) FROM leads WHERE created_at >= ?", (since,)).fetchone()[0]
+
+
+def annual_payment_volume(session_id: str, customer_id: str | None) -> int:
+    """What is known of the customer's yearly volume: the profile for a customer, the Lead for a prospect; 0 if nothing."""
+    if customer_id:
+        return int((get_customer(customer_id) or {}).get("annual_payment_volume") or 0)
+    return int((get_lead(session_id) or {}).get("annual_volume_usd") or 0)
 
 
 def dangling_tool_call_ids(working_memory: list[dict[str, Any]]) -> list[str]:

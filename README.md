@@ -10,9 +10,10 @@ documentation — or hand a hard question to a research sub-agent — look up th
 catalogue or pricing, and answer with sources; when a request is ambiguous it asks a
 clarifying question with options; when the matter needs a person, it proposes a handoff and
 waits for the customer's yes; and no reply reaches the customer with a placeholder or a line
-from an internal document. Every step streamed, every turn metered. Prospects, memory, and
-long-conversation handling land ticket by ticket
-([issues #9–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
+from an internal document. Someone with no Stripe account is a **prospect**: the agent runs
+discovery, recommends a starting set of products and captures what it learned as a **lead**.
+Every step streamed, every turn metered. Memory and long-conversation handling land ticket by
+ticket ([issues #10–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
 
 ---
 
@@ -81,16 +82,17 @@ stripe-sales-copilot/
 │   │   ├── knowledge.py      # search_knowledge(question, products[], topics[]) + source_extraction
 │   │   ├── research.py       # research(question): the sub-agent over search_knowledge on deepseek-flash
 │   │   ├── handoff.py        # request_handoff + its three guardrails, the seven Teams, confirm/decline
-│   │   └── clarify.py        # ask_customer(question, options[]) + clean_question — ends the turn with clickable options
+│   │   ├── clarify.py        # ask_customer(question, options[]) + clean_question — ends the turn with clickable options
+│   │   └── lead.py           # capture_lead(...) + prospect_only — one Lead per prospect session, refined as they talk
 │   └── static/index.html     # Customer chat UI
 ├── data/
 │   ├── seed.db               # Tracked, read-only: customers, products, usage, policies
-│   └── runtime.db            # Gitignored, created on first start: sessions, messages, handoffs, metrics
+│   └── runtime.db            # Gitignored, created on first start: sessions, messages, handoffs, leads, metrics
 ├── scripts/build_seed_db.py  # Rebuild data/seed.db from data.xlsx
-├── skills/<name>/SKILL.md    # 10 skills: 7 product, 3 policy (pricing, security, objections)
+├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 119 tests, no network, ~19s (builds a real Milvus Lite fixture)
+├── tests/                    # 130 tests, no network, ~19s (builds a real Milvus Lite fixture)
 ├── docs/adr/                 # Architecture decision records
 ├── CONTEXT.md                # Domain glossary
 └── ARCHITECTURE.md
@@ -129,11 +131,12 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash)
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` | Customer chat UI |
-| `GET` | `/api/customers` | Customers for the sign-in selector |
+| `GET` | `/api/customers` | The sign-in selector: a **New prospect** entry first (`customer_id: null, prospect: true`), then every customer |
+| `GET` | `/api/leads?limit=50` | Leads captured from prospects, most recently updated first — the follow-up queue |
 | `POST` | `/sales-agent/chat` | One turn, JSON reply with `sources`. `404` unknown customer, `409` session already bound to another customer |
 | `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
 | `POST` | `/sales-agent/confirm-handoff` | `{session_id, accept, handoff_id?}` — the customer's answer to a pending handoff; the agent's follow-up streams back as SSE. `404` when nothing is pending, `409` for a stale proposal |
-| `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, calls per tool |
+| `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, leads captured, calls per tool |
 
 Request body for both chat endpoints:
 
@@ -141,13 +144,14 @@ Request body for both chat endpoints:
 { "session_id": "uuid", "customer_id": "CUST-001", "message": "What does Checkout do?" }
 ```
 
-`customer_id` may be omitted: the session is then a prospect with no profile. A session is bound to its
-customer on first contact and refuses to switch.
+`customer_id` may be omitted: the session is then a **prospect session** — the customer block says
+nothing is known yet, `get_my_profile` reports no profile, and the model runs discovery and
+captures a lead. A session is bound to its customer on first contact and refuses to switch.
 
 ## Testing
 
 ```bash
-pytest            # 119 tests in ~19s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 130 tests in ~19s; no model calls; temp runtime DB and a temp Milvus Lite index
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
@@ -162,6 +166,7 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_knowledge_search.py` | A fixture knowledge base indexed through the fake embedder: public-only in both collections, chunking, vocabulary from the graph, one-hop expansion, keyword fallback, filter expression, fused ranking, the `search_knowledge` tool, `sources` on `done` |
 | `tests/test_research.py` | The research sub-agent: its own model and single tool, none of the main conversation in its requests, only the brief in working memory, the round cap and forced brief, cited-only sources, live progress events, separate metering (and none for a cached brief), tool descriptions that steer |
 | `tests/test_handoff.py` | Handoff: the seven Teams and the policy register mapping, unknown team / untraceable evidence denied with feedback, the $10M rule, pause → confirm → `handoffs` row → follow-up, decline without a record, a new message resolving a dangling proposal, other calls in the paused round not run, the policy skills free of internal text |
+| `tests/test_prospect.py` | Prospect sessions: the block knows nothing yet and points at discovery, `get_my_profile` reports no profile, the customers list leads with **New prospect**; the `discovery` skill teaches behaviour and quotes no internal text (every skill body passes `leaks()`); `capture_lead` writes one row per session, later calls refine it and return the whole lead, an empty call gets feedback, a signed-in customer is denied (`prospect_only`), a prospect who states $50M is routed to Enterprise Sales; `/api/leads` newest first and `leads_captured` in metrics |
 | `tests/test_clarify_and_stop.py` | `ask_customer` ends the turn with options and the choice is the next message; 2–5 distinct options; a question that would leak or leave blanks is denied with feedback; Stop hook rewrites placeholders and internal leaks before anything streams, gives up after two rewrites with a safe reply, and checks the text beside a handoff proposal; citations, links and sign-offs handled; `leaks()` finds curated and document-derived markers and nothing a public document says |
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
@@ -179,20 +184,23 @@ them. Adding a behaviour is adding a file.
 
 | Tool | What the model gets |
 |---|---|
-| `Skill(name)` | the skill body; one of `payments`, `billing`, `connect`, `tax`, `fraud_protection`, `terminal`, `data` |
-| `get_my_profile()` | the bound customer's profile and products in use — no arguments, so no way to ask about anyone else |
+| `Skill(name)` | the skill body; one of the seven product skills or `discovery`, `pricing_conversation`, `security_compliance`, `objection_handling` |
+| `get_my_profile()` | the bound customer's profile and products in use — no arguments, so no way to ask about anyone else. In a prospect session: no profile, and a note to ask |
 | `list_products(group?)` | the catalogue from the seed database |
 | `get_pricing(product)` | public list prices for the product, read from the `Price` sections of knowledge-base documents marked `Access Level: public` (the seed database holds no prices); when nothing matches it says so instead of guessing |
 | `search_knowledge(question, products[], topics[])` | passages from Stripe's public documentation with their sources. `products` and `topics` are enums from the knowledge graph — the model does the entity linking, the graph widens the search one hop, and dense + BM25 legs run with the same filter and are fused |
 | `research(question)` | a **sub-agent**: a bounded loop on `deepseek-flash` with `search_knowledge` as its only tool, up to 3 rounds, in its own context. Only its cited brief comes back, and the customer watches each search as it happens. For questions that span products, need a comparison, or came back thin from one search |
 | `request_handoff(team, reason, evidence)` | propose handing the conversation to one of seven human **Teams**. Guardrails check the team, that the evidence is the customer's own words or a profile fact, and that a customer above $10M a year goes to Enterprise Sales; then the turn **pauses** and the customer confirms or declines in the UI. Only a confirmation records a handoff |
 | `ask_customer(question, options[])` | a clarifying question with 2–5 clickable options when a request could mean different things. The turn ends with the question; the option the customer clicks is simply their next message |
+| `capture_lead(company?, business_model?, annual_volume_usd?, timeline?, needs?, qualification_notes?, recommended_products?)` | what a prospect has said, written as the session's **Lead** — one row per session; each call adds what it names, keeps the rest, and returns the whole lead with what is still unknown. Denied with feedback for a signed-in customer (`prospect_only`); the volume a prospect gives feeds the $10M rule |
 
 Every call passes through the hooks: `turn_budget` (8 tool rounds per turn; the ninth
 is denied with feedback, the next request forces a text answer, and a model that still
 asks for tools is stopped), `tool_cache_lookup` (identical calls within a session are
 served from a TTL cache), `handoff_validity` and `enterprise_volume` (deny a handoff
-with feedback), `handoff_confirmation` (pause for the customer), `result_cap` (results
+with feedback — the volume comes from the profile or, for a prospect, from the lead),
+`handoff_confirmation` (pause for the customer), `prospect_only` (leads are for
+prospects), `result_cap` (results
 over ~1.5K tokens are truncated at a boundary with a note), `tool_cache_store`,
 `source_extraction` (sources a search cited are collected on the turn and returned on
 `done`). Every final reply then passes the **Stop hooks** before a word of it is streamed:
@@ -217,9 +225,21 @@ there, telling the customer what happens next. Only a confirmation brings a team
 decline is kept as bookkeeping and contacts nobody. A customer who sends a new message
 instead is treated as declining, so the transcript never carries a dangling tool call.
 The policy register's team names are mapped onto the seven Teams and each policy line in
-the prompt names the team behind it. Three policy skills — `pricing_conversation`,
-`security_compliance`, `objection_handling` — turn the internal documents into behaviour
-rules and approved wording, quoting no internal text ([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)).
+the prompt names the team behind it. Four conversation skills — `discovery`,
+`pricing_conversation`, `security_compliance`, `objection_handling` — turn the internal
+documents into behaviour rules and approved wording, quoting no internal text
+([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)).
+
+## Prospects and leads
+
+Pick **New prospect** in the UI (or omit `customer_id`) and the agent knows nothing. The
+`discovery` skill — the sales playbook translated into behaviour, with none of its
+qualification framework, segments or process — tells it what to learn (business model,
+volume, timeline, current setup and pain, where they sell, who decides, alternatives),
+how to ask (pain first, one or two questions a turn, `ask_customer` when the answers are
+few), which starting set to recommend for which business model, and when to bring a
+team in. As soon as it knows something concrete it calls `capture_lead`; every later
+call refines the same row. `GET /api/leads` is the queue for whoever follows up.
 
 ## Knowledge search
 
@@ -255,6 +275,14 @@ A prospect asked "How much would Stripe cost us?": the model loaded
 `pricing_conversation`, fetched the public card rates, then asked — online, in person,
 subscriptions, a platform, or not sure — with five clickable options; "Both" came back as
 the next message and it answered with online and Terminal pricing side by side.
+
+A prospect — "a small online furniture store thinking about switching" — got the
+`discovery` skill and two questions. Told "900 orders a month, average $350, US only,
+Canada next year, on Shopify Payments, fraud chargebacks are killing us, I decide", the
+model loaded `fraud_protection` and `payments`, captured the lead with the volume worked
+out ($3.78M a year), priced Radar, and recommended Radar + Payments; "live before the
+holiday season" refined the same lead with the timeline and the recommended set
+(Payments, Checkout, Radar). Turn 2: 22,016 of 24,004 prompt tokens from cache.
 
 A $43M customer asked for "a better rate than 2.9%": the model loaded
 `pricing_conversation`, checked the profile, proposed **Enterprise Sales** (not Deal Desk —

@@ -132,10 +132,14 @@
   }
 
   function empty() {
-    const name = customerSel.selectedOptions[0]?.textContent || "there";
     const div = document.createElement("div");
     div.className = "empty";
-    div.innerHTML = `<strong>Hi ${escapeHtml(name.split(" — ")[0])}.</strong>Ask me anything about Stripe — what a product does, what it costs, or what would fit your business.`;
+    if (!state.customerId) {
+      div.innerHTML = `<strong>Welcome — new to Stripe?</strong>Tell me a little about your business and how you take payments today, and I'll suggest where to start. Or ask about any product or price.`;
+    } else {
+      const name = customerSel.selectedOptions[0]?.textContent || "there";
+      div.innerHTML = `<strong>Hi ${escapeHtml(name.split(" — ")[0])}.</strong>Ask me anything about Stripe — what a product does, what it costs, or what would fit your business.`;
+    }
     thread.appendChild(div);
   }
 
@@ -318,8 +322,8 @@
     customerSel.innerHTML = "";
     for (const c of rows) {
       const o = document.createElement("option");
-      o.value = c.customer_id;
-      o.textContent = `${c.customer_name} — ${c.industry || ""}`.replace(/ — $/, "");
+      o.value = c.customer_id || "";
+      o.textContent = c.prospect ? "New prospect — no Stripe account yet" : `${c.customer_name} — ${c.industry || ""}`.replace(/ — $/, "");
       customerSel.appendChild(o);
     }
     const remembered = store.get("customer");

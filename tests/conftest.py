@@ -92,8 +92,13 @@ def sse_events(body: str) -> list[tuple[str, dict]]:
     return out
 
 
+def customers(client) -> list[dict]:
+    """The signed-in choices — the list without its 'new prospect' entry."""
+    return [c for c in client.get("/api/customers").json() if c["customer_id"]]
+
+
 def first_customer(client) -> dict:
-    return client.get("/api/customers").json()[0]
+    return customers(client)[0]
 
 
 def chat(client, session_id: str, message: str, customer_id: str | None = None):

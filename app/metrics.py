@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.database import count_handoffs, get_connection
+from app.database import count_handoffs, count_leads, get_connection
 
 log = logging.getLogger(__name__)
 
@@ -181,6 +181,7 @@ def summary(days: int = 7) -> dict[str, Any]:
         "subagent_tokens": row["subagent_tokens"] or 0,
         "handoffs_confirmed": count_handoffs(since, "confirmed"),
         "handoffs_declined": count_handoffs(since, "declined"),
+        "leads_captured": count_leads(since),
     }
 
 

@@ -49,7 +49,8 @@ synchronous endpoint, keeps only the last one.
    hooks render the customer block, which is frozen into the `sessions` row. Later
    turns reuse that exact text, so the block can never drift mid-session
    ([ADR 0005](docs/adr/0005-append-only-prompt-prefix.md)). A session with no
-   `customer_id` is a Prospect; its block says so.
+   `customer_id` is a Prospect: its block says nothing is known yet and points at the
+   `discovery` skill and `capture_lead`.
 2. **Request assembly** in the fixed order — see below.
 3. **Completion.** The Provider streams; the first reasoning delta is announced once
    as `thinking`, text deltas are **held**, and the final `Completed` event carries usage
@@ -124,7 +125,10 @@ Seven product skills exist, authored from the public product documentation only
 ([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)):
 `payments`, `billing`, `connect`, `tax`, `fraud_protection`, `terminal`, `data`. Each
 gives the model the products in the area, when to recommend which, what to establish
-first, public pricing, and when to offer a human.
+first, public pricing, and when to offer a human. Four conversation skills —
+`discovery`, `pricing_conversation`, `security_compliance`, `objection_handling` — are
+the translation of the three Internal Knowledge documents into behaviour (see Handoff
+and Prospects below); a test runs every skill body through `leaks()`.
 
 ### Tools — `tools.py`, `app/tools/`
 
@@ -144,6 +148,7 @@ Results are compact JSON — they live in every later request of the session.
 | `research(question)` | a Sub-agent (below) over `search_knowledge` | returns `{brief, sources, tool_calls, stopped_by_cap, gave_up}`; the documents the brief cites in `[Title]` form are its sources (a brief that cites nothing keeps everything it read); `meta.subagent` carries its metering |
 | `request_handoff(team, reason, evidence)` | `handoffs` (runtime) | never runs inside a turn: `handoff_confirmation` pauses first, and the customer's answer produces its result (see Handoff) |
 | `ask_customer(question, options[])` | — | writes its result at once and **ends the turn** (`EndTurn` on the result): the harness emits `ask_customer`, gives the round's other calls a "not run" result, and makes the question the reply; the customer's click is their next message. 2–5 distinct options, else feedback |
+| `capture_lead(company?, business_model?, annual_volume_usd?, timeline?, needs?, qualification_notes?, recommended_products?)` | `leads` (runtime) | upsert keyed by session: `COALESCE(new, old)` per column, so a call adds or corrects what it names and keeps the rest; returns the whole lead plus `still_unknown`. Volume is stored as whole dollars a year. Not cacheable |
 
 ### Sub-agents — `subagent.py`, `app/tools/research.py`
 
@@ -201,7 +206,8 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
 | `tool_cache_store` | PostToolUse | successful cacheable results enter the cache |
 | `source_extraction` | PostToolUse | sources a tool cites (`meta.sources`) are collected on the turn, de-duplicated, and returned in `done.sources` |
 | `handoff_validity` | PreToolUse | `request_handoff` with an unknown team, empty evidence, or evidence that matches nothing the customer said (a passage, or ≥60% of its whole words) and names no actual profile value is denied with feedback — field names alone never count |
-| `enterprise_volume` | PreToolUse | a customer whose profile shows more than $10M annual payment volume can only be handed to Enterprise Sales; anything else is denied with feedback naming the rule |
+| `enterprise_volume` | PreToolUse | a customer whose profile shows more than $10M annual payment volume — or a prospect whose lead does — can only be handed to Enterprise Sales; anything else is denied with feedback naming the rule |
+| `prospect_only` | PreToolUse | `capture_lead` in a session bound to a customer is denied with feedback: a Lead is the record of a Prospect, and a signed-in customer already has a profile |
 | `handoff_confirmation` | PreToolUse | every valid `request_handoff` creates a pending `handoffs` row and pauses the turn with `handoff_pending` |
 | `anti_placeholder` | Stop | a reply containing an unfilled placeholder — `[Customer Name]`, `[Insert …]`, `<your email>`, `{{ template }}`, `TBD` — is sent back; source citations like `[Stripe Checkout]` and markdown links are not placeholders |
 | `internal_canary` | Stop | a reply containing any marker of Internal Knowledge is sent back. Markers are a curated list ("INTERNAL ONLY", "Discount Ranges", "VP of Sales", …) plus, derived at first use from the non-public documents, their section headings of three words or more and their percentage ranges — minus anything a public document also says (public and internal documents share their section structure, and "buy-rates" or "do not share" appear in public text), so an honest answer is never sent back. `leaks(text)` exposes the same check for tests and evaluation; this is the one place outside ingestion that opens those files, and nothing read is ever sent to a model — it is a blocklist |
@@ -249,6 +255,27 @@ workflows, competitor tactics or segmentation tables
 ([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)). A test
 loads them and asserts the prompt stays free of internal markers.
 
+### Prospects and leads — `app/tools/lead.py`, `skills/discovery/SKILL.md`
+
+A session started without a `customer_id` is a Prospect session. Nothing changes in the
+harness: the SessionStart block says nothing is known yet, `get_my_profile` returns no
+profile and a note to ask, and the `discovery` skill carries the behaviour — what to
+learn (business model, volume, timeline, current setup and pain, where they sell, who
+decides, alternatives), how to ask (pain before products, one or two questions a turn,
+`ask_customer` when the answers are few, pricing answered from the public list and then
+deferred until fit is clear), which starting set fits which business model, and when to
+propose a handoff. It is the sales playbook translated into behaviour: none of its
+qualification framework, segment table, deal stages or process rules appear
+([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)).
+
+What the prospect says becomes a **Lead**: `capture_lead` upserts one `leads` row per
+session, so the model can record a company name and a need on the first turn and add
+volume, timeline and the recommended products as it learns them; each call returns the
+whole lead with what is still unknown. The lead is also the prospect's stand-in profile
+for the one guardrail that reads volume: a prospect who has said $50M a year is routed to
+Enterprise Sales like a customer whose profile says so. `GET /api/leads` lists leads
+newest first for whoever follows up, and `summary()` counts them.
+
 ### The Provider seam — `provider.py`
 
 The only path to a model. `complete(CompletionRequest) -> Iterator[StreamEvent]`
@@ -279,13 +306,14 @@ its own on `app.state.harness` first.
 |---|---|
 | `POST /sales-agent/chat` | runs a turn, returns the `done`/`error` payload as `ChatResponse` |
 | `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
-| `GET /api/customers` | sign-in selector |
-| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn; `tool_usage()` — calls per tool |
+| `GET /api/customers` | sign-in selector: a `New prospect` entry (`customer_id: null, prospect: true`) first, then every customer with `prospect: false` |
+| `GET /api/leads?limit=N` | leads most recently updated first, `recommended_products` decoded |
+| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn, handoffs, leads captured; `tool_usage()` — calls per tool |
 
 `done` carries `sources` — the `(title, url)` pairs collected by `source_extraction` — and the UI renders them as links under the reply; `/sales-agent/chat` returns them in `ChatResponse.sources`.
 | `GET /` | the chat UI |
 
-The UI (`static/index.html`) is a single page: a sign-in-as-customer selector, a
+The UI (`static/index.html`) is a single page: a sign-in-as-customer / new-prospect selector, a
 streamed conversation with a Claude Code-style activity list above each reply (one row
 per tool call: skill loaded, result size, cached, or blocked-by-hook), and per-reply
 latency / token / cache-hit / tool-round figures. The session id lives in
@@ -308,6 +336,7 @@ gitignored and created on first start.
 | runtime | `sessions` | session → customer binding and the frozen customer block |
 | runtime | `messages` | working memory, one row per message, insert-only |
 | runtime | `handoffs` | one row per proposed handoff: session, customer, team, reason, evidence, `pending` → `confirmed` / `declined` / `abandoned` |
+| runtime | `leads` | one row per prospect session (`session_id` unique): company, business model, annual volume, timeline, needs, qualification notes, recommended products, created / updated |
 | runtime | `turn_metrics` | one row per turn |
 
 `get_connection()` opens the runtime file as the main database (`WAL`,
@@ -392,14 +421,14 @@ older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the sche
 `runtime.db` from an earlier version keeps working. `summary(days)` returns turn count, error count,
 average latency, average prompt / completion / reasoning tokens, total cache hit and
 miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits,
-provider calls per turn, sub-agent delegations and tokens, and handoffs confirmed and
-declined; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
+provider calls per turn, sub-agent delegations and tokens, handoffs confirmed and
+declined, and leads captured; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
 first-class number because the prefix discipline in ADR 0005 is easy to break by
 accident and this is where a break shows first.
 
 ## Testing
 
-119 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~19 s. The app under test
+130 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~19 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -414,7 +443,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 
 | Ticket | Adds |
 |---|---|
-| #9 | prospect discovery and lead capture |
 | #10 | Customer Memory and Reflection |
 | #11 | attachments, tool-result clearing, compaction with hysteresis |
 | #12 | evaluation suite |

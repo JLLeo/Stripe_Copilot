@@ -74,7 +74,8 @@ def customer_block(profile: dict[str, Any] | None, product_usage: list[dict[str,
     if profile is None:
         return (
             "Customer: unknown — this is a new prospect with no Stripe account. "
-            "Nothing is known about them yet; learn about their business as you talk."
+            "Nothing is known about them yet; learn about their business as you talk (the discovery skill "
+            "says how) and record what you learn with capture_lead so a colleague can follow up."
         )
 
     lines = [f"Customer: {profile.get('customer_name', 'unknown')} (id {profile.get('customer_id', '')})"]

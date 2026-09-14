@@ -23,5 +23,6 @@ def test_customer_list_is_served_from_the_seed_database():
     customers = response.json()
     with sqlite3.connect(database.seed_db_path()) as seed:
         expected = seed.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
-    assert len(customers) == expected > 0
-    assert {"customer_id", "customer_name", "industry", "annual_payment_volume"} <= set(customers[0])
+    assert len(customers) == expected + 1 > 1, "every customer, plus the choice to be a new prospect"
+    assert customers[0]["prospect"] is True and customers[0]["customer_id"] is None
+    assert {"customer_id", "customer_name", "industry", "annual_payment_volume"} <= set(customers[1])
