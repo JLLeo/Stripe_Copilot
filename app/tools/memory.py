@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from app import database
 from app.database import MEMORY_KINDS
+from app.harness.context import COMPACTION_PREFACE
 from app.harness.hooks import Deny, HookEvent, HookRegistry, SessionEndContext, ToolUseContext
 from app.harness.provider import Provider
 from app.harness.subagent import SubagentSpec, run_subagent
@@ -256,7 +257,8 @@ def reflection_task(customer_name: str, working_memory: list[dict[str, Any]], me
         content = (m.get("content") or "").strip()
         if not content or m["role"] not in ("user", "assistant"):
             continue
-        if m["role"] == "user" and content.startswith("[Stop hook"):
+        if m["role"] == "user" and content.startswith(COMPACTION_PREFACE):
+            turns.append("Summary of the earlier conversation:\n" + content[len(COMPACTION_PREFACE):].strip())
             continue
         turns.append(("Customer: " if m["role"] == "user" else "Agent: ") + content)
     transcript = "\n".join(turns)

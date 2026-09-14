@@ -11,7 +11,7 @@ from app.harness.hooks import HookRegistry
 from app.harness.provider import Provider
 from app.harness.tools import ToolRegistry
 from app.retrieval.index import KnowledgeIndex
-from app.tools import catalog, clarify, handoff, knowledge, lead, memory, profile, research
+from app.tools import attachment, catalog, clarify, handoff, knowledge, lead, memory, profile, research
 
 
 def register_all(
@@ -37,6 +37,7 @@ def register_all(
     clarify.register(registry)
     lead.register(registry)
     memory.register(registry)
+    attachment.register(registry, result_cap_chars=result_cap_chars)
     knowledge.register_guardrails(hooks)
     handoff.register_guardrails(hooks)
     clarify.register_guardrails(hooks)

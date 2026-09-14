@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Generator, Iterator
 
 from app import database
-from app.harness import guardrails, prompt
+from app.harness import context, guardrails, prompt
 from app.harness.hooks import (
     Deny,
     HookEvent,
@@ -100,9 +100,24 @@ class HarnessConfig:
     result_cap_chars: int = 6000  # ≈1.5K tokens; larger tool results are truncated
     tool_cache_ttl_seconds: float = 900.0
     milvus_uri: str = DEFAULT_MILVUS_URI
-    sub_model: str = "deepseek-flash"  # sub-agents: research, reflection
+    sub_model: str = "deepseek-flash"  # sub-agents: research, reflection; also the compaction summary
     subagent_max_rounds: int = 3
     memory_limit: int = 12  # active Customer Memory facts rendered into the customer block at SessionStart
+    # Context pressure (ADR 0006). Every threshold lives here; triggers read the provider's reported
+    # prompt_tokens, sizes use a characters/4 estimate.
+    turn_result_budget_chars: int = 24_000  # ≈6K tokens of tool results per turn, then results are cut to what is left
+    attachment_threshold_chars: int = 8_000  # ≈2K tokens; a longer customer message becomes an Attachment
+    context_budget_tokens: int = 96_000  # the share of the context window a session may occupy
+    high_water: float = 0.75  # relief runs when the last response reported this share of the budget
+    low_water: float = 0.40  # compaction lands here: the summary plus the recent window
+    summary_max_tokens: int = 800  # the rolling summary never grows past this
+    recent_window_tokens: int = 24_000  # kept verbatim through a compaction
+
+    def __post_init__(self) -> None:
+        if not 0 < self.low_water < self.high_water <= 1:
+            raise ValueError("water marks must satisfy 0 < low_water < high_water <= 1")
+        if self.summary_max_tokens + self.recent_window_tokens > self.low_water * self.context_budget_tokens:
+            raise ValueError("summary_max_tokens + recent_window_tokens must fit under the low-water mark")
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -118,6 +133,13 @@ class HarnessConfig:
             sub_model=os.environ.get("HARNESS_SUB_MODEL", cls.sub_model),
             subagent_max_rounds=int(os.environ.get("HARNESS_SUBAGENT_MAX_ROUNDS", cls.subagent_max_rounds)),
             memory_limit=int(os.environ.get("HARNESS_MEMORY_LIMIT", cls.memory_limit)),
+            turn_result_budget_chars=int(os.environ.get("HARNESS_TURN_RESULT_BUDGET_CHARS", cls.turn_result_budget_chars)),
+            attachment_threshold_chars=int(os.environ.get("HARNESS_ATTACHMENT_THRESHOLD_CHARS", cls.attachment_threshold_chars)),
+            context_budget_tokens=int(os.environ.get("HARNESS_CONTEXT_BUDGET_TOKENS", cls.context_budget_tokens)),
+            high_water=float(os.environ.get("HARNESS_HIGH_WATER", cls.high_water)),
+            low_water=float(os.environ.get("HARNESS_LOW_WATER", cls.low_water)),
+            summary_max_tokens=int(os.environ.get("HARNESS_SUMMARY_MAX_TOKENS", cls.summary_max_tokens)),
+            recent_window_tokens=int(os.environ.get("HARNESS_RECENT_WINDOW_TOKENS", cls.recent_window_tokens)),
         )
 
 
@@ -141,7 +163,7 @@ class Ended:
 class TurnEvent:
     """What the transport layer forwards to the customer's client."""
 
-    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | ask_customer | done | error
+    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | ask_customer | context_relieved | done | error
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -164,6 +186,18 @@ class _Books:
         self.subagent_calls += 1  # one delegation, however many rounds it took
         self.subagent_prompt_tokens += metering.usage.prompt_tokens
         self.subagent_completion_tokens += metering.usage.completion_tokens
+
+    def add_relief(self, relief: "context.Relief") -> None:
+        """Relief runs on the sub-agent model: its tokens are booked with the sub-agents', but it is no delegation."""
+        self.subagent_prompt_tokens += relief.usage.prompt_tokens
+        self.subagent_completion_tokens += relief.usage.completion_tokens
+        self.provider_calls += relief.provider_calls
+        if relief.cleared:
+            self.hook_outcomes["cleared"] = relief.cleared
+        if relief.compacted:
+            self.hook_outcomes["compacted"] = 1
+        if relief.failed:
+            self.hook_outcomes["compaction_failed"] = 1
 
     def outcome(self, name: str) -> None:
         self.hook_outcomes[name] = self.hook_outcomes.get(name, 0) + 1
@@ -192,6 +226,7 @@ class Harness:
             hooks,
             tool_round_budget=config.tool_round_budget,
             result_cap_chars=config.result_cap_chars,
+            turn_result_budget_chars=config.turn_result_budget_chars,
             cache=guardrails.ToolCache(ttl_seconds=config.tool_cache_ttl_seconds),
         )
 
@@ -214,12 +249,22 @@ class Harness:
     def run_turn(self, session_id: str, customer_id: str | None, message: str) -> Iterator[TurnEvent]:
         """One customer message, to the model's final reply or to a pause for confirmation."""
         session = self._bind_session(session_id, customer_id)
-        working_memory = self._settled_working_memory(session_id)
+        # Settle first, so relief works on a valid transcript; then relieve pressure from the last
+        # response before this turn's request is built (ADR 0006); then render what the model sees.
+        self._settled_working_memory(session_id)
+        relief = context.relieve(session, self.provider, self.config)
+        working_memory = database.load_messages(session_id)
+        turn = TurnState(session_id=session_id, customer_id=session["customer_id"], customer_message=message)
+        # A long message is kept as an Attachment; the model reads it in pieces. Guardrails still
+        # see the whole text on the turn.
+        user_message = message
+        if len(message) > self.config.attachment_threshold_chars:
+            attachment = database.create_attachment(session_id, turn.turn_id, message)
+            user_message = context.attachment_stub(attachment["id"], message)
         # Assistant rows carry their reasoning_content on purpose: DeepSeek requires it
         # back whenever `tools` are present (thinking-mode guide).
-        messages = prompt.assemble_messages(self.static_prompt, session["customer_block"], working_memory, message)
-        turn = TurnState(session_id=session_id, customer_id=session["customer_id"], customer_message=message)
-        yield from self._loop(session, turn, messages, new_messages=[messages[-1]])
+        messages = prompt.assemble_messages(self.static_prompt, session["customer_block"], working_memory, user_message)
+        yield from self._loop(session, turn, messages, new_messages=[messages[-1]], relief=relief)
 
     def resume_turn(self, session_id: str, accept: bool) -> Iterator[TurnEvent]:
         """The customer answered a pending handoff: settle the paused tool call, then let the model go on.
@@ -295,7 +340,8 @@ class Harness:
         return working_memory + settled
 
     def _loop(
-        self, session: dict[str, Any], turn: TurnState, messages: list[dict[str, Any]], new_messages: list[dict[str, Any]]
+        self, session: dict[str, Any], turn: TurnState, messages: list[dict[str, Any]], new_messages: list[dict[str, Any]],
+        relief: "context.Relief | None" = None,
     ) -> Iterator[TurnEvent]:
         """Request → tool rounds → reply. `new_messages` is what this turn appends to working memory."""
         session_id = turn.session_id
@@ -307,6 +353,9 @@ class Harness:
         paused: Paused | None = None
         ended: Ended | None = None
         rewrites = 0
+        if relief is not None and relief.happened:
+            books.add_relief(relief)
+            yield TurnEvent("context_relieved", {"cleared": relief.cleared, "compacted": relief.compacted, "failed": relief.failed})
 
         def book(error: str | None = None) -> None:
             record_turn(TurnRecord(
@@ -351,6 +400,8 @@ class Harness:
                     raise RuntimeError("provider stream ended without a completion")
                 books.usage = books.usage + completion.usage
                 books.model = completion.model or books.model
+                if completion.usage.prompt_tokens:
+                    database.set_last_prompt_tokens(session_id, completion.usage.prompt_tokens)
 
                 if completion.tool_calls and asked_for_text:
                     # The model ignored tool_choice="none". Stop here rather than loop on denials.

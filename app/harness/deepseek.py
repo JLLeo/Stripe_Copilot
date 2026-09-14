@@ -15,7 +15,10 @@ DeepSeek specifics handled here:
   `prompt_cache_miss_tokens`, our prompt-cache metric.
 
 Transient failures (429, 5xx, connection errors) are retried by the client
-library itself (`max_retries`); anything else propagates to the harness.
+library itself (`max_retries`); anything else propagates to the harness. A
+request that stalls is given up after `timeout` seconds (between stream chunks
+as well as on connect), so a silent API never holds a turn for the library's
+ten-minute default times its retries.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from app.harness.provider import (
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_TIMEOUT_SECONDS = 180.0  # a long thinking reply streams reasoning well before this; a stall does not
 
 
 class DeepSeekProvider:
@@ -47,14 +51,16 @@ class DeepSeekProvider:
         self._embedding_model = embedding_model
 
     @classmethod
-    def from_env(cls, max_retries: int = 3) -> "DeepSeekProvider":
+    def from_env(cls, max_retries: int = 2, timeout: float | None = None) -> "DeepSeekProvider":
+        timeout = timeout or float(os.environ.get("DEEPSEEK_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
         return cls(
             chat_client=OpenAI(
                 api_key=os.environ["DEEPSEEK_API_KEY"],
                 base_url=os.environ.get("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL),
                 max_retries=max_retries,
+                timeout=timeout,
             ),
-            embed_client=OpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=max_retries),
+            embed_client=OpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=max_retries, timeout=timeout),
             embedding_model=os.environ.get("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
         )
 

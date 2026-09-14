@@ -49,7 +49,7 @@ def cap_result(result: ToolResult, max_chars: int) -> ToolResult | None:
     text = result.content
     if len(text) <= max_chars:
         return None
-    cut = _boundary(text, max_chars)
+    cut = cut_at_boundary(text, max_chars)
     note = TRUNCATION_NOTE.format(shown=cut, total=len(text))
     return ToolResult(content=text[:cut] + note, is_error=result.is_error, meta={**result.meta, "truncated": True})
 
@@ -61,8 +61,37 @@ def make_result_cap(max_chars: int):
     return result_cap
 
 
-def _boundary(text: str, limit: int) -> int:
-    """Cut at the last line, sentence, or JSON boundary before `limit` — never mid-word."""
+# ---------------------------------------------------------------------------
+# turn_result_budget — PostToolUse
+# ---------------------------------------------------------------------------
+TURN_BUDGET_NOTE = "\n[truncated: this turn's tool-result budget is spent — answer from what you have, or continue next turn]"
+TURN_BUDGET_MIN_KEEP = 300  # every result keeps at least this much, so the model always learns what came back
+# A skill body is instructions the model is still following, bounded by the number of skills — not spent
+# data. Neither the turn budget nor clearing (context.py) touches it.
+INSTRUCTION_TOOLS = ("Skill",)
+
+
+def make_turn_result_budget(budget_chars: int):
+    """Once a turn's tool results add up to the budget, further results are cut to what is left (ADR 0006)."""
+
+    def turn_result_budget(ctx: ToolUseContext, result: ToolResult) -> ToolResult | None:
+        if ctx.tool.name in INSTRUCTION_TOOLS:
+            return None
+        text = result.content
+        allowance = budget_chars - ctx.turn.result_chars
+        if len(text) <= allowance:
+            ctx.turn.result_chars += len(text)
+            return None
+        keep = max(allowance, TURN_BUDGET_MIN_KEEP)
+        cut = cut_at_boundary(text, keep) if len(text) > keep else len(text)
+        ctx.turn.result_chars += cut
+        return ToolResult(content=text[:cut] + TURN_BUDGET_NOTE, is_error=result.is_error, meta={**result.meta, "truncated": True})
+
+    return turn_result_budget
+
+
+def cut_at_boundary(text: str, limit: int) -> int:
+    """Where to cut `text` so at most `limit` characters remain: the last line, sentence, or JSON boundary — never mid-word."""
     window = text[:limit]
     # The latest boundary in the tail of the window wins; boundaries are ranked only
     # to break ties between a structural marker and a plain space at the same spot.
@@ -239,12 +268,15 @@ def internal_canary(ctx: StopContext) -> Deny | None:
 # ---------------------------------------------------------------------------
 # Wiring
 # ---------------------------------------------------------------------------
-def register_defaults(hooks: HookRegistry, *, tool_round_budget: int, result_cap_chars: int, cache: ToolCache) -> None:
+def register_defaults(
+    hooks: HookRegistry, *, tool_round_budget: int, result_cap_chars: int, turn_result_budget_chars: int, cache: ToolCache
+) -> None:
     """The guardrails every tool gets, in the order they run, and the checks every reply gets."""
     lookup, store = make_tool_cache_hooks(cache)
     hooks.register(HookEvent.PRE_TOOL_USE, make_turn_budget(tool_round_budget))
     hooks.register(HookEvent.PRE_TOOL_USE, lookup)
     hooks.register(HookEvent.POST_TOOL_USE, make_result_cap(result_cap_chars))
-    hooks.register(HookEvent.POST_TOOL_USE, store)
+    hooks.register(HookEvent.POST_TOOL_USE, store)  # the cache keeps the capped result, not this turn's budget cut
+    hooks.register(HookEvent.POST_TOOL_USE, make_turn_result_budget(turn_result_budget_chars))
     hooks.register(HookEvent.STOP, anti_placeholder)
     hooks.register(HookEvent.STOP, internal_canary)

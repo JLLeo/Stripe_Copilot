@@ -134,6 +134,15 @@ def test_deepseek_adapter_sends_the_request_as_deepseek_expects():
     assert call["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
+def test_deepseek_clients_give_up_on_a_stalled_request(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
+    monkeypatch.setenv("OPENAI_API_KEY", "y")
+    provider = DeepSeekProvider.from_env()
+    assert provider._chat.timeout == 180.0 and provider._chat.max_retries == 2
+    monkeypatch.setenv("DEEPSEEK_TIMEOUT_SECONDS", "30")
+    assert DeepSeekProvider.from_env()._chat.timeout == 30.0
+
+
 def test_deepseek_adapter_omits_tools_when_there_are_none():
     chat = _StubChat([_chunk(content="ok"), _chunk(finish="stop"), _chunk(usage=_usage())])
     provider = DeepSeekProvider(chat_client=SimpleNamespace(chat=chat), embed_client=None)

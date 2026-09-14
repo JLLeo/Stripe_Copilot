@@ -13,7 +13,7 @@ import pytest
 
 from app import database
 from app.harness.core import Harness, HarnessConfig
-from app.harness.guardrails import _boundary
+from app.harness.guardrails import cut_at_boundary
 from app.harness.provider import Completion, ToolCall
 from app.harness.skills import SkillLoadError, load_skills
 from app.metrics import init_metrics, summary
@@ -116,7 +116,7 @@ def test_skills_carry_no_tool_allowlist_and_definitions_are_stable(client, provi
     a, b = provider.requests
     assert json.dumps(a.tools, sort_keys=True) == json.dumps(b.tools, sort_keys=True)
     names = [t["function"]["name"] for t in a.tools]
-    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff", "ask_customer", "capture_lead", "remember"]
+    assert names == ["Skill", "get_my_profile", "list_products", "get_pricing", "search_knowledge", "research", "request_handoff", "ask_customer", "capture_lead", "remember", "read_attachment"]
     skill_tool = a.tools[0]["function"]
     assert sorted(skill_tool["parameters"]["properties"]["name"]["enum"]) == sorted(PRODUCT_SKILLS | POLICY_SKILLS)
     assert "allowed" not in json.dumps(a.tools)
@@ -268,7 +268,7 @@ def test_oversized_results_are_capped_at_a_boundary_with_a_note(client, provider
 
 def test_truncation_boundary_is_the_latest_one_in_the_window():
     text = "a" * 218 + "}," + " prose. " * 25
-    cut = _boundary(text, 400)
+    cut = cut_at_boundary(text, 400)
     assert 360 <= cut <= 400, "a sentence end near the cap beats a JSON boundary far before it"
     assert text[:cut].rstrip().endswith(".")
 

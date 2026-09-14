@@ -6,7 +6,8 @@ Seed database   (tracked, read-only)   data/seed.db
     Rebuild from data.xlsx with:  python scripts/build_seed_db.py
 
 Runtime database (ignored, read-write)  data/runtime.db
-    sessions, messages, handoffs, leads, customer_memory, turn_metrics — everything the agent writes.
+    sessions, messages, attachments, compactions, handoffs, leads, customer_memory,
+    turn_metrics — everything the agent writes.
     Created on first start.
 
 Callers never learn which table lives where: the runtime database is the main
@@ -47,6 +48,8 @@ RUNTIME_TABLES: tuple[str, ...] = (
     "handoffs",
     "leads",
     "customer_memory",
+    "attachments",
+    "compactions",
     "turn_metrics",  # DDL lives in app.metrics.init_metrics; ownership is recorded here.
 )
 
@@ -129,12 +132,13 @@ def init_db() -> None:
             customer_id     TEXT,
             customer_block  TEXT NOT NULL,
             created_at      TEXT NOT NULL,
-            ended_at        TEXT
+            ended_at        TEXT,
+            last_prompt_tokens INTEGER NOT NULL DEFAULT 0
         )
     """)
-    if "ended_at" not in {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}:
-        conn.execute("ALTER TABLE sessions ADD COLUMN ended_at TEXT")  # runtime databases from before SessionEnd
-    # Working memory: one row per message, only ever inserted (ADR 0005).
+    _add_missing_columns(conn, "sessions", {"ended_at": "TEXT", "last_prompt_tokens": "INTEGER NOT NULL DEFAULT 0"})
+    # Working memory: one row per message, only ever inserted; content is never rewritten.
+    # `cleared_at` is the one column that changes: a spent tool result rendered as a stub (ADR 0006).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,10 +149,38 @@ def init_db() -> None:
             tool_calls_json    TEXT,
             tool_call_id       TEXT,
             name               TEXT,
-            created_at         TEXT NOT NULL
+            created_at         TEXT NOT NULL,
+            cleared_at         TEXT
         )
     """)
+    _add_missing_columns(conn, "messages", {"cleared_at": "TEXT"})
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)")
+    # An Attachment is a long customer message kept out of working memory and read in pieces.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS attachments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT NOT NULL REFERENCES sessions(session_id),
+            turn_id     TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            chars       INTEGER NOT NULL,
+            created_at  TEXT NOT NULL
+        )
+    """)
+    # A Compaction replaces every message up to `through_message_id` with one rolling summary.
+    # Rows stay where they are; rendering starts after the latest compaction.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS compactions (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id            TEXT NOT NULL REFERENCES sessions(session_id),
+            through_message_id    INTEGER NOT NULL,
+            summary               TEXT NOT NULL,   -- the rendered summary message, preface included
+            skills_json           TEXT NOT NULL,   -- skills loaded so far, carried from one summary to the next
+            model                 TEXT NOT NULL,
+            prompt_tokens_before  INTEGER NOT NULL,
+            created_at            TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_compactions_session ON compactions(session_id, id)")
     # A Handoff row is created when the model proposes one and resolved when the customer answers.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS handoffs (
@@ -202,6 +234,14 @@ def init_db() -> None:
     conn.commit()
 
 
+def _add_missing_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    """Runtime databases from earlier versions gain new columns in place."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, declaration in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+
 # ---------------------------------------------------------------------------
 # Sessions and working memory
 # ---------------------------------------------------------------------------
@@ -212,10 +252,18 @@ def _now() -> str:
 def load_session(session_id: str) -> dict[str, Any] | None:
     """Session binding and its SessionStart customer block, or None if unseen."""
     row = get_connection().execute(
-        "SELECT session_id, customer_id, customer_block, created_at, ended_at FROM sessions WHERE session_id = ?",
+        "SELECT session_id, customer_id, customer_block, created_at, ended_at, last_prompt_tokens "
+        "FROM sessions WHERE session_id = ?",
         (session_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def set_last_prompt_tokens(session_id: str, prompt_tokens: int) -> None:
+    """What the provider reported for the latest request — the number context relief reads (ADR 0006)."""
+    conn = get_connection()
+    conn.execute("UPDATE sessions SET last_prompt_tokens = ? WHERE session_id = ?", (int(prompt_tokens), session_id))
+    conn.commit()
 
 
 def end_session(session_id: str) -> bool:
@@ -238,15 +286,25 @@ def create_session(session_id: str, customer_id: str | None, customer_block: str
     return load_session(session_id)  # type: ignore[return-value]
 
 
-def load_messages(session_id: str) -> list[dict[str, Any]]:
-    """Working memory in wire shape, oldest first."""
+CLEARED_STUB = "[cleared: earlier {name} result ({chars:,} characters); call the tool again if you need it]"
+
+
+def load_message_rows(session_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """The latest compaction (or None) and the rows after it, each as {id, role, tool, chars, message}.
+
+    `message` is the wire shape the model sees: a cleared tool result is rendered as a
+    one-line stub, the row's content untouched. `tool` names the tool a tool row answers.
+    """
+    compaction = latest_compaction(session_id)
+    after = compaction["through_message_id"] if compaction else 0
     rows = get_connection().execute(
         """
-        SELECT role, content, reasoning_content, tool_calls_json, tool_call_id, name
-        FROM messages WHERE session_id = ? ORDER BY id
+        SELECT id, role, content, reasoning_content, tool_calls_json, tool_call_id, name, cleared_at
+        FROM messages WHERE session_id = ? AND id > ? ORDER BY id
         """,
-        (session_id,),
+        (session_id, after),
     ).fetchall()
+    names: dict[str, str] = {}  # tool call id -> tool name, from the assistant row that made the call
     out: list[dict[str, Any]] = []
     for r in rows:
         msg: dict[str, Any] = {"role": r["role"], "content": r["content"]}
@@ -254,12 +312,99 @@ def load_messages(session_id: str) -> list[dict[str, Any]]:
             msg["reasoning_content"] = r["reasoning_content"]
         if r["tool_calls_json"]:
             msg["tool_calls"] = json.loads(r["tool_calls_json"])
+            for call in msg["tool_calls"]:
+                names[call["id"]] = call["function"]["name"]
         if r["tool_call_id"]:
             msg["tool_call_id"] = r["tool_call_id"]
         if r["name"]:
             msg["name"] = r["name"]
-        out.append(msg)
-    return out
+        tool = names.get(r["tool_call_id"]) if r["role"] == "tool" else None
+        original = len(r["content"] or "")
+        if r["cleared_at"]:
+            msg["content"] = CLEARED_STUB.format(name=tool or "tool", chars=original)
+        out.append({
+            "id": r["id"], "role": r["role"], "tool": tool, "cleared": bool(r["cleared_at"]), "message": msg,
+            "chars": len(msg["content"] or ""),  # as rendered — what sizing sees
+            "original_chars": original,
+        })
+    return compaction, out
+
+
+def load_messages(session_id: str) -> list[dict[str, Any]]:
+    """Working memory in wire shape, oldest first: the latest summary (if any), then every message after it."""
+    compaction, rows = load_message_rows(session_id)
+    messages = [r["message"] for r in rows]
+    if compaction:
+        messages.insert(0, {"role": "user", "content": compaction["summary"]})
+    return messages
+
+
+def clear_tool_results(session_id: str, *, min_chars: int, exempt: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Render spent tool results as stubs: every uncleared tool row after the latest compaction, over `min_chars`,
+    from a tool not in `exempt`. Returns what was cleared ({id, tool, chars}). Content is kept."""
+    _, rows = load_message_rows(session_id)
+    victims = [r for r in rows if r["role"] == "tool" and not r["cleared"] and r["original_chars"] > min_chars and r["tool"] not in exempt]
+    if victims:
+        conn = get_connection()
+        now = _now()
+        conn.executemany("UPDATE messages SET cleared_at = ? WHERE id = ?", [(now, r["id"]) for r in victims])
+        conn.commit()
+    return [{"id": r["id"], "tool": r["tool"], "chars": r["original_chars"]} for r in victims]
+
+
+def latest_compaction(session_id: str) -> dict[str, Any] | None:
+    row = get_connection().execute(
+        "SELECT * FROM compactions WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    compaction = dict(row)
+    compaction["skills"] = json.loads(compaction.pop("skills_json") or "[]")
+    return compaction
+
+
+def record_compaction(
+    session_id: str, *, through_message_id: int, summary: str, skills: list[str], model: str, prompt_tokens_before: int
+) -> dict[str, Any]:
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO compactions (session_id, through_message_id, summary, skills_json, model, prompt_tokens_before, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (session_id, through_message_id, summary, json.dumps(skills), model, prompt_tokens_before, _now()),
+    )
+    conn.commit()
+    return latest_compaction(session_id)  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+def create_attachment(session_id: str, turn_id: str, content: str) -> dict[str, Any]:
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO attachments (session_id, turn_id, content, chars, created_at) VALUES (?, ?, ?, ?, ?)",
+        (session_id, turn_id, content, len(content), _now()),
+    )
+    conn.commit()
+    return {"id": int(cur.lastrowid), "session_id": session_id, "chars": len(content)}
+
+
+def list_attachments(session_id: str) -> list[dict[str, Any]]:
+    """The session's attachments without their content — what a summary can point the model back to."""
+    rows = get_connection().execute(
+        "SELECT id, chars FROM attachments WHERE session_id = ? ORDER BY id", (session_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_attachment(attachment_id: int, session_id: str) -> dict[str, Any] | None:
+    """An attachment of this session, or None — another session's attachments cannot be named."""
+    row = get_connection().execute(
+        "SELECT * FROM attachments WHERE id = ? AND session_id = ?", (attachment_id, session_id)
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def append_messages(session_id: str, messages: list[dict[str, Any]]) -> None:
@@ -435,6 +580,20 @@ def active_memories(customer_id: str, limit: int | None = None) -> list[dict[str
         sql += " LIMIT ?"
         params += (limit,)
     return [dict(r) for r in get_connection().execute(sql, params).fetchall()]
+
+
+def session_memories(session_id: str, customer_id: str) -> list[dict[str, Any]]:
+    """The customer's active facts that were recorded during this session (by a turn or its SessionEnd pass)."""
+    rows = get_connection().execute(
+        """
+        SELECT * FROM customer_memory
+        WHERE customer_id = ? AND status = ?
+          AND source_turn IN (SELECT turn_id FROM turn_metrics WHERE session_id = ?)
+        ORDER BY id
+        """,
+        (customer_id, MEMORY_ACTIVE, session_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def _settle_memory(memory_id: int, customer_id: str, status: str, superseded_by: int | None) -> bool:

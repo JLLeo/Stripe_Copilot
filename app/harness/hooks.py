@@ -66,6 +66,7 @@ class TurnState:
     turn_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     tool_rounds: int = 0  # model responses that carried tool calls, so far this turn
     tools_exhausted: bool = False  # set by turn_budget once it has denied a call this turn
+    result_chars: int = 0  # tool-result characters admitted this turn, kept by turn_result_budget
     sources: list[dict[str, str]] = field(default_factory=list)  # collected by source_extraction for the reply
 
 

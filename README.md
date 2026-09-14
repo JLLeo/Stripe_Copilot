@@ -14,9 +14,11 @@ from an internal document. Someone with no Stripe account is a **prospect**: the
 discovery, recommends a starting set of products and captures what it learned as a **lead**.
 An existing customer who comes back is remembered: what they said last time is in the
 prompt from the first turn, corrected when they say it changed, and completed by a reflection
-pass when they end the conversation. Every step streamed, every turn metered.
-Long-conversation handling and the evaluation suite land ticket by ticket
-([issues #11–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1)).
+pass when they end the conversation. A pasted document becomes an attachment the agent
+reads in pieces, and a very long conversation stays coherent: spent tool results are
+cleared and, rarely, working memory is compacted into one rolling summary. Every step
+streamed, every turn metered. The evaluation suite and the final documentation pass land
+with [issues #12–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1).
 
 ---
 
@@ -30,19 +32,20 @@ customer message  ─►  /sales-agent/stream
              │ Harness.run_turn            │
              │  1. SessionStart (first     │   customer block frozen from the
              │     contact only)           │   Customer Profile + Customer Memory
-             │  2. assemble request        │   static prompt · tools · customer · memory
-             │  3. Provider.complete       │   DeepSeek, streamed
-             │  4. tool calls?             │   PreToolUse → run → PostToolUse,
+             │  2. relieve pressure        │   clear spent results, compact — only past the high-water mark
+             │  3. assemble request        │   static prompt · tools · customer · memory; a long message → Attachment
+             │  4. Provider.complete       │   DeepSeek, streamed
+             │  5. tool calls?             │   PreToolUse → run → PostToolUse,
              │     └─ round again          │   Skill / search_knowledge / research / request_handoff / …
              │     └─ or pause             │   a handoff waits for the customer's answer
-             │  5. Stop hooks on the reply │   anti_placeholder, internal_canary → rewrite
-             │  6. append every message    │   working memory
-             │  7. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
+             │  6. Stop hooks on the reply │   anti_placeholder, internal_canary → rewrite
+             │  7. append every message    │   working memory
+             │  8. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
              └─────────────────────────────┘
    POST /sales-agent/end ──► SessionEnd: a reflection sub-agent keeps what the agent did not record
                           │
                           ▼
-   SSE: thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer)* · text_delta* · done | error
+   SSE: context_relieved? · thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer)* · text_delta* · done | error
 ```
 
 Every request is built in the same order — static system prompt, tool definitions
@@ -70,7 +73,8 @@ stripe-sales-copilot/
 │   │   ├── tools.py          # Tool = function + JSON schema; registry; argument checks
 │   │   ├── skills.py         # SKILL.md loader + the Skill tool
 │   │   ├── hooks.py          # Hook events; SessionStart / PreToolUse / PostToolUse dispatch
-│   │   ├── guardrails.py     # turn_budget, result_cap, tool cache, anti_placeholder, internal_canary, leaks()
+│   │   ├── guardrails.py     # turn_budget, result_cap, turn_result_budget, tool cache, anti_placeholder, internal_canary, leaks()
+│   │   ├── context.py        # Context Budget: attachment stubs, clearing, compaction with a rolling summary (ADR 0006)
 │   │   ├── subagent.py       # Bounded model loop with its own context → a Brief
 │   │   └── core.py           # Harness.run_turn — the loop with tool rounds
 │   ├── retrieval/
@@ -88,16 +92,17 @@ stripe-sales-copilot/
 │   │   ├── handoff.py        # request_handoff + its three guardrails, the seven Teams, confirm/decline
 │   │   ├── clarify.py        # ask_customer(question, options[]) + clean_question — ends the turn with clickable options
 │   │   ├── lead.py           # capture_lead(...) + prospect_only — one Lead per prospect session, refined as they talk
-│   │   └── memory.py         # remember(kind, fact, replaces?) + customer_only, and the SessionEnd reflection sub-agent
+│   │   ├── memory.py         # remember(kind, fact, replaces?) + customer_only, and the SessionEnd reflection sub-agent
+│   │   └── attachment.py     # read_attachment(id, offset, limit) — a long customer message, read in pieces
 │   └── static/index.html     # Customer chat UI
 ├── data/
 │   ├── seed.db               # Tracked, read-only: customers, products, usage, policies
-│   └── runtime.db            # Gitignored, created on first start: sessions, messages, handoffs, leads, customer_memory, metrics
+│   └── runtime.db            # Gitignored, created on first start: sessions, messages, attachments, compactions, handoffs, leads, customer_memory, metrics
 ├── scripts/build_seed_db.py  # Rebuild data/seed.db from data.xlsx
 ├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 144 tests, no network, ~19s (builds a real Milvus Lite fixture)
+├── tests/                    # 159 tests, no network, ~24s (builds a real Milvus Lite fixture)
 ├── docs/adr/                 # Architecture decision records
 ├── CONTEXT.md                # Domain glossary
 └── ARCHITECTURE.md
@@ -129,7 +134,10 @@ python -m uvicorn app.main:app --reload
 Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash), `HARNESS_MAX_TOKENS`,
 `HARNESS_THINKING=enabled|disabled`, `HARNESS_TOOL_ROUND_BUDGET` (8), `HARNESS_SUBAGENT_MAX_ROUNDS` (3),
 `HARNESS_RESULT_CAP_CHARS` (6000), `HARNESS_TOOL_CACHE_TTL_SECONDS` (900), `HARNESS_MEMORY_LIMIT` (12), `HARNESS_SKILLS_DIR`,
-`MILVUS_URI`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`.
+`MILVUS_URI`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`; and the context thresholds `HARNESS_TURN_RESULT_BUDGET_CHARS` (24000),
+`HARNESS_ATTACHMENT_THRESHOLD_CHARS` (8000), `HARNESS_CONTEXT_BUDGET_TOKENS` (96000), `HARNESS_HIGH_WATER` (0.75),
+`HARNESS_LOW_WATER` (0.40), `HARNESS_SUMMARY_MAX_TOKENS` (800), `HARNESS_RECENT_WINDOW_TOKENS` (24000) — see
+"Context management".
 
 ## API
 
@@ -139,7 +147,7 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash)
 | `GET` | `/api/customers` | The sign-in selector: a **New prospect** entry first (`customer_id: null, prospect: true`), then every customer |
 | `GET` | `/api/leads?limit=50` | Leads captured from prospects, most recently updated first — the follow-up queue |
 | `POST` | `/sales-agent/chat` | One turn, JSON reply with `sources`. `404` unknown customer, `409` session already bound to another customer |
-| `POST` | `/sales-agent/stream` | One turn as SSE: `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
+| `POST` | `/sales-agent/stream` | One turn as SSE: `context_relieved`? (spent results cleared / working memory compacted before this turn), `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
 | `POST` | `/sales-agent/confirm-handoff` | `{session_id, accept, handoff_id?}` — the customer's answer to a pending handoff; the agent's follow-up streams back as SSE. `404` when nothing is pending, `409` for a stale proposal |
 | `POST` | `/sales-agent/end` | `{session_id}` — the customer ends the conversation. `SessionEnd` runs the reflection sub-agent for a customer (never for a prospect) and returns `{reflected, remembered, merged}`; the session takes no more turns (`409`). `404` unknown session, `409` already ended |
 | `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, leads captured, reflection passes, calls per tool |
@@ -157,7 +165,7 @@ captures a lead. A session is bound to its customer on first contact and refuses
 ## Testing
 
 ```bash
-pytest            # 144 tests in ~19s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 159 tests in ~24s; no model calls; temp runtime DB and a temp Milvus Lite index
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
@@ -172,6 +180,7 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_knowledge_search.py` | A fixture knowledge base indexed through the fake embedder: public-only in both collections, chunking, vocabulary from the graph, one-hop expansion, keyword fallback, filter expression, fused ranking, the `search_knowledge` tool, `sources` on `done` |
 | `tests/test_research.py` | The research sub-agent: its own model and single tool, none of the main conversation in its requests, only the brief in working memory, the round cap and forced brief, cited-only sources, live progress events, separate metering (and none for a cached brief), tool descriptions that steer |
 | `tests/test_handoff.py` | Handoff: the seven Teams and the policy register mapping, unknown team / untraceable evidence denied with feedback, the $10M rule, pause → confirm → `handoffs` row → follow-up, decline without a record, a new message resolving a dangling proposal, other calls in the paused round not run, the policy skills free of internal text |
+| `tests/test_context.py` | Context pressure: every threshold in `HarnessConfig` (validated: low < high, summary + window under the low mark); a long message becomes an attachment with a stub and is read by offset in plain-text pieces that always fit the result cap, scoped to its session; evidence in an attached message still counts; a turn's tool results are capped in total (skill bodies exempt); spent results become stubs when the last response was over the high-water mark, content kept in the row; compaction runs at the high mark on `deepseek-flash` in its own context, keeps the static prefix and the current message, a token-budgeted window starting at a customer message, records active skills, folds the previous summary, caps the summary, does not run again until pressure returns, and a failed summary throws nothing away; reflection reads a summary as context |
 | `tests/test_memory.py` | Customer Memory: `remember` → row with source turn and confidence; the next session's first request carries the fact with its `[m<id>]`; a correction supersedes, a retraction drops it from the block; the same fact is never written twice (by `remember` or by reflection); kinds and ids validated; denied for a prospect; the injected set is bounded to 12, most recent first; `/sales-agent/end` runs reflection on `deepseek-flash` in its own context, writes merged rows, is metered as a `session_end` pass, refuses further turns and a second end, skips prospects, and ends the session even when the sub-agent fails. The prefix test in `test_harness_chat.py` now includes a turn that remembers a fact |
 | `tests/test_prospect.py` | Prospect sessions: the block knows nothing yet and points at discovery, `get_my_profile` reports no profile, the customers list leads with **New prospect**; the `discovery` skill teaches behaviour and quotes no internal text (every skill body passes `leaks()`); `capture_lead` writes one row per session, later calls refine it and return the whole lead, an empty call gets feedback, a signed-in customer is denied (`prospect_only`), a prospect who states $50M is routed to Enterprise Sales; `/api/leads` newest first and `leads_captured` in metrics |
 | `tests/test_clarify_and_stop.py` | `ask_customer` ends the turn with options and the choice is the next message; 2–5 distinct options; a question that would leak or leave blanks is denied with feedback; Stop hook rewrites placeholders and internal leaks before anything streams, gives up after two rewrites with a safe reply, and checks the text beside a handoff proposal; citations, links and sign-offs handled; `leaks()` finds curated and document-derived markers and nothing a public document says |
@@ -200,6 +209,7 @@ them. Adding a behaviour is adding a file.
 | `request_handoff(team, reason, evidence)` | propose handing the conversation to one of seven human **Teams**. Guardrails check the team, that the evidence is the customer's own words or a profile fact, and that a customer above $10M a year goes to Enterprise Sales; then the turn **pauses** and the customer confirms or declines in the UI. Only a confirmation records a handoff |
 | `ask_customer(question, options[])` | a clarifying question with 2–5 clickable options when a request could mean different things. The turn ends with the question; the option the customer clicks is simply their next message |
 | `capture_lead(company?, business_model?, annual_volume_usd?, timeline?, needs?, qualification_notes?, recommended_products?)` | what a prospect has said, written as the session's **Lead** — one row per session; each call adds what it names, keeps the rest, and returns the whole lead with what is still unknown. Denied with feedback for a signed-in customer (`prospect_only`); the volume a prospect gives feeds the $10M rule |
+| `read_attachment(id, offset?, limit?)` | a piece of a long customer message that was kept as an **attachment** (over 8,000 characters by default) — plain text under a one-line header with the next offset; a piece always fits the result cap, and only this session's attachments can be named |
 | `remember(kind, fact, replaces?)` | keep a durable fact about the customer for future conversations — `need`, `objection`, `preference`, `commitment` or `stage`. `replaces=<id>` with a new fact corrects an earlier one; with an empty fact it drops it. Facts are never edited in place. Denied with feedback in a prospect session (`customer_only`) |
 
 Every call passes through the hooks: `turn_budget` (8 tool rounds per turn; the ninth
@@ -210,6 +220,8 @@ with feedback — the volume comes from the profile or, for a prospect, from the
 `handoff_confirmation` (pause for the customer), `prospect_only` (leads are for
 prospects), `customer_only` (memory is for customers), `result_cap` (results
 over ~1.5K tokens are truncated at a boundary with a note), `tool_cache_store`,
+`turn_result_budget` (once a turn's tool results reach ~6K tokens, further results are cut
+to what is left, at least a few hundred characters each; skill bodies are exempt),
 `source_extraction` (sources a search cited are collected on the turn and returned on
 `done`). Every final reply then passes the **Stop hooks** before a word of it is streamed:
 `anti_placeholder` (unfilled `[Customer Name]`, `{{ }}`, `<your …>`, TBD) and
@@ -237,6 +249,46 @@ the prompt names the team behind it. Four conversation skills — `discovery`,
 `pricing_conversation`, `security_compliance`, `objection_handling` — turn the internal
 documents into behaviour rules and approved wording, quoting no internal text
 ([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)).
+
+## Context management
+
+A long conversation must stay coherent without breaking the cached prefix on every
+turn, so pressure is relieved in tiers and compaction is the last resort
+([ADR 0006](docs/adr/0006-context-pressure-relieved-in-tiers.md)):
+
+1. **Limits at the source.** One tool result is capped (`result_cap`), a turn's results
+   are capped in total (`turn_result_budget`), heavy reading goes through the `research`
+   sub-agent so only a brief enters the conversation, and a customer message over the
+   attachment threshold is kept as an **attachment**: working memory gets a short stub
+   with the id, size and opening, and the model reads the pieces it needs with
+   `read_attachment`. Guardrails still see the whole message.
+2. **Clearing.** When the previous response reported prompt tokens at or above the
+   high-water mark, tool results from earlier turns are rendered as one-line stubs
+   (`[cleared: earlier search_knowledge result (2,340 characters); call the tool again
+   if you need it]`). The rows keep their content; only the rendering changes. Skill
+   bodies are never cleared. Deterministic, free, and often enough.
+3. **Compaction.** If clearing does not bring the estimate under the mark, everything
+   before a token-budgeted recent window is folded into one rolling summary written
+   by `deepseek-flash` in its own context — what the customer's business is and wants,
+   every concrete fact they stated, what the agent recommended or quoted with sources,
+   open questions, where things stand — followed by lines the harness writes itself:
+   the active skills, the facts established this session (a customer's still-active
+   memories, a prospect's lead), and the attachments the customer sent. The whole
+   summary never exceeds its cap; the window is sized to land at the low-water mark and
+   starts at a customer message (and shrinks to the last customer turn when it would
+   otherwise hold everything); the current message is always verbatim; the static
+   prefix is untouched. The next compaction folds the previous summary in. A failed
+   summary throws nothing away.
+
+Triggers read the provider's reported `prompt_tokens` (there is no local tokenizer);
+the window and the summary cap use a characters/4 estimate. Every threshold lives in
+`HarnessConfig`: `tool_round_budget` 8, `result_cap_chars` 6000, `turn_result_budget_chars`
+24000, `attachment_threshold_chars` 8000, `context_budget_tokens` 96000, `high_water` 0.75,
+`low_water` 0.40, `summary_max_tokens` 800, `recent_window_tokens` 24000 — validated so that
+the summary plus the window fit under the low-water mark, which is where a compacted session
+lands. The UI shows a `context` row when a turn cleared or compacted; metrics record
+`cleared`, `compacted` and `compaction_failed`, and the summary's tokens are booked with the
+sub-agents'.
 
 ## Customer memory
 
@@ -310,6 +362,17 @@ model loaded `fraud_protection` and `payments`, captured the lead with the volum
 out ($3.78M a year), priced Radar, and recommended Radar + Payments; "live before the
 holiday season" refined the same lead with the timeline and the recommended set
 (Payments, Checkout, Radar). Turn 2: 22,016 of 24,004 prompt tokens from cache.
+
+With the budget shrunk to 12K tokens for the run (attachment threshold 3,000 characters), a
+customer pasted a 25-point requirements list of 4,827 characters: the model read it in two
+`read_attachment` pieces, loaded four skills, searched twice and answered. On the next turn
+the reported prompt tokens were over the high-water mark: four spent results were cleared,
+and that was enough. A turn later clearing one more was not, and working memory was compacted
+into one summary on `deepseek-flash` — 15,395 reported tokens before, the next request 8,140
+tokens with 8,064 of them from cache. Two turns after that, "remind me: what was our dispute
+rate and what did you recommend for it?" was answered from the summary: 1.8% of orders, Radar
+for Fraud Teams. Two further compactions folded the earlier summaries in; seven results were
+cleared over the conversation.
 
 A $3.1M SaaS customer opened with "we've decided to go live with Stripe Billing in Q1
 next year, our CFO refuses anything with per-seat pricing, and please email rather than
