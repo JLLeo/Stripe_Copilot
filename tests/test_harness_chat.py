@@ -12,7 +12,7 @@ import re
 import pytest
 
 from app import database, main
-from app.harness.provider import Completion, Usage
+from app.harness.provider import Completion, ToolCall, Usage
 from tests.conftest import chat as _chat
 from tests.conftest import customers as _customers
 from tests.conftest import first_customer as _customer
@@ -55,18 +55,33 @@ def test_prefix_is_byte_identical_across_consecutive_turns(client, provider):
     provider.script(
         Completion(content="first", reasoning_content="let me think"),
         "second",
+        Completion(content="", finish_reason="tool_calls", tool_calls=(
+            ToolCall(id="c0", name="remember", arguments=json.dumps({"kind": "commitment", "fact": "Going live with Stripe in Q4"})),
+        )),
+        "third",
+        "fourth",
     )
     cid = _customer(client)["customer_id"]
 
     _chat(client, "s1", "one", cid)
     _chat(client, "s1", "two", cid)
 
-    first, second = provider.requests
+    first, second = provider.requests[:2]
     shared = len(first.messages)
     # Everything the model saw on turn one, plus its own reply, is an exact prefix of turn two.
     assert json.dumps(second.messages[:shared], sort_keys=True) == json.dumps(first.messages, sort_keys=True)
     assert second.messages[shared] == {"role": "assistant", "content": "first", "reasoning_content": "let me think"}
     assert second.messages[-1] == {"role": "user", "content": "two"}
+
+    # A fact remembered mid-session is appended as messages, never re-rendered into the block (ADR 0005).
+    _chat(client, "s1", "We're going live with Stripe in Q4.", cid)
+    _chat(client, "s1", "four", cid)
+    third, fourth = provider.requests[2], provider.requests[4]
+    assert json.dumps(fourth.messages[: len(third.messages)], sort_keys=True) == json.dumps(third.messages, sort_keys=True)
+    assert fourth.messages[1] == first.messages[1], "the customer block is frozen for the life of the session"
+    appended = fourth.messages[len(third.messages):]
+    assert any(m["role"] == "tool" and "Going live with Stripe in Q4" in m["content"] for m in appended)
+    assert "Going live with Stripe in Q4" not in fourth.messages[1]["content"]
 
 
 def test_static_prompt_carries_policies_and_the_never_do_list_but_no_clock(client, provider):

@@ -69,8 +69,10 @@ def static_system_prompt(
     return "\n\n".join(parts)
 
 
-def customer_block(profile: dict[str, Any] | None, product_usage: list[dict[str, Any]]) -> str:
-    """The customer the agent is talking to, or the fact that it is a prospect."""
+def customer_block(
+    profile: dict[str, Any] | None, product_usage: list[dict[str, Any]], memories: list[dict[str, Any]] | None = None
+) -> str:
+    """The customer the agent is talking to — profile, products in use, what they said before — or the fact that it is a prospect."""
     if profile is None:
         return (
             "Customer: unknown — this is a new prospect with no Stripe account. "
@@ -96,6 +98,11 @@ def customer_block(profile: dict[str, Any] | None, product_usage: list[dict[str,
             lines.append(f"- {row.get('product_name')}" + (f" ({detail})" if detail else ""))
     else:
         lines.append("Stripe products in use: none recorded.")
+    if memories:
+        lines.append("What they told us in earlier conversations (correct a wrong one with remember, replaces=<id>):")
+        for m in memories:
+            note = "" if m.get("confidence", 1.0) >= 0.7 else " (unconfirmed)"
+            lines.append(f"- [m{m['id']}] {m['kind']} — {m['fact']}{note}")
     return "\n".join(lines)
 
 

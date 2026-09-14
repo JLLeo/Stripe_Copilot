@@ -81,9 +81,17 @@ def test_the_chosen_option_arrives_as_the_next_customer_message(client, provider
     _stream(client, "s1", "How much would Stripe cost us?")
     r = _chat(client, "s1", "Subscriptions")
     assert r.json()["reply"].startswith("Subscriptions —")
+    assert r.json()["ask_customer"] is None
     second = provider.requests[1]
     assert second.messages[-1] == {"role": "user", "content": "Subscriptions"}
     assert second.messages[-2]["role"] == "tool", "the question's tool result precedes the answer"
+
+
+def test_the_synchronous_endpoint_returns_the_question_and_options_too(client, provider):
+    provider.script(_ask())
+    r = _chat(client, "s1", "How much would Stripe cost us?")
+    assert r.json()["reply"] == "Do you sell one-off products, subscriptions, or both?"
+    assert r.json()["ask_customer"]["options"] == ["One-off", "Subscriptions", "Both"]
 
 
 def test_a_question_needs_two_to_five_options(client, provider):

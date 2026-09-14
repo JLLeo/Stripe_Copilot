@@ -13,13 +13,13 @@ Claude Code's:
     POST_TOOL_USE   after a tool returns: return a modified result, or None
     STOP            the model is done: validate the reply (Deny sends it back to
                     the model with feedback, before the customer sees a word of it)
-    SESSION_END     the customer ends the conversation: reflection
-
-SESSION_END gains its dispatcher with the ticket that needs it.
+    SESSION_END     the customer ends the conversation: hooks return what they
+                    did (reflection writes Customer Memory)
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -44,6 +44,16 @@ class SessionStartContext:
     customer_id: str | None
     profile: dict[str, Any] | None
     product_usage: list[dict[str, Any]]
+    memories: list[dict[str, Any]] = field(default_factory=list)  # the bounded set of active Customer Memory
+
+
+@dataclass(frozen=True)
+class SessionEndContext:
+    session_id: str
+    customer_id: str | None
+    pass_id: str  # identifies the SessionEnd pass, as a turn id does a turn
+    working_memory: list[dict[str, Any]]  # the whole session, settled
+    memories: list[dict[str, Any]]  # every active fact about the customer
 
 
 @dataclass
@@ -53,6 +63,7 @@ class TurnState:
     session_id: str
     customer_id: str | None
     customer_message: str = ""  # what the customer said this turn; guardrails may check evidence against it
+    turn_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     tool_rounds: int = 0  # model responses that carried tool calls, so far this turn
     tools_exhausted: bool = False  # set by turn_budget once it has denied a call this turn
     sources: list[dict[str, str]] = field(default_factory=list)  # collected by source_extraction for the reply
@@ -106,6 +117,7 @@ SessionStartHook = Callable[[SessionStartContext], str | None]
 PreToolUseHook = Callable[[ToolUseContext], PreToolUseOutcome | None]
 PostToolUseHook = Callable[[ToolUseContext, ToolResult], ToolResult | None]
 StopHook = Callable[[StopContext], "Deny | None"]
+SessionEndHook = Callable[[SessionEndContext], "dict[str, Any] | None"]
 
 
 @dataclass(frozen=True)
@@ -157,3 +169,12 @@ class HookRegistry:
             if isinstance(outcome, Deny):
                 return Decision(outcome, hook=getattr(hook, "__name__", type(hook).__name__))
         return Decision(Allow())
+
+    def run_session_end(self, ctx: SessionEndContext) -> dict[str, Any]:
+        """Every SessionEnd hook runs; what each reports is merged into one summary for the client."""
+        summary: dict[str, Any] = {}
+        for hook in self._hooks[HookEvent.SESSION_END]:
+            outcome = hook(ctx)
+            if outcome:
+                summary.update(outcome)
+        return summary

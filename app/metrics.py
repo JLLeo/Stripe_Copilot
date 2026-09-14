@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS turn_metrics (
     subagent_prompt_tokens     INTEGER DEFAULT 0,
     subagent_completion_tokens INTEGER DEFAULT 0,
     latency_ms         INTEGER DEFAULT 0,
-    error              TEXT
+    error              TEXT,
+    kind               TEXT DEFAULT 'turn'
 )
 """
 _INDEXES = (
@@ -101,6 +102,7 @@ class TurnRecord:
     subagent_completion_tokens: int = 0
     latency_ms: int = 0
     error: str | None = None
+    kind: str = "turn"  # turn | session_end (a reflection pass: sub-agent tokens only, no main-model call)
 
 
 def record_turn(record: TurnRecord) -> None:
@@ -114,8 +116,8 @@ def record_turn(record: TurnRecord) -> None:
                 prompt_tokens, completion_tokens, reasoning_tokens,
                 cache_hit_tokens, cache_miss_tokens, provider_calls,
                 tool_rounds, tools_json, skills_json, hooks_json, cache_hits,
-                subagent_calls, subagent_prompt_tokens, subagent_completion_tokens, latency_ms, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                subagent_calls, subagent_prompt_tokens, subagent_completion_tokens, latency_ms, error, kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.turn_id, record.session_id, record.customer_id,
@@ -125,7 +127,7 @@ def record_turn(record: TurnRecord) -> None:
                 record.tool_rounds, json.dumps(record.tools_called), json.dumps(record.skills_loaded),
                 json.dumps(record.hook_outcomes), record.cache_hits,
                 record.subagent_calls, record.subagent_prompt_tokens, record.subagent_completion_tokens,
-                record.latency_ms, record.error,
+                record.latency_ms, record.error, record.kind,
             ),
         )
         conn.commit()
@@ -137,23 +139,27 @@ def record_turn(record: TurnRecord) -> None:
 # Reporting
 # ---------------------------------------------------------------------------
 def summary(days: int = 7) -> dict[str, Any]:
-    """Aggregate over the last `days`: volume, latency, tokens, cache hit rate, errors."""
+    """Aggregate over the last `days`: volume, latency, tokens, cache hit rate, errors.
+
+    Per-turn averages count turns only; token and sub-agent sums include SessionEnd passes.
+    """
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     row = get_connection().execute(
         """
         SELECT
-            COUNT(*)                                   AS turns,
+            SUM(CASE WHEN kind = 'turn' THEN 1 ELSE 0 END)        AS turns,
+            SUM(CASE WHEN kind = 'session_end' THEN 1 ELSE 0 END) AS reflections,
             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
-            AVG(latency_ms)                            AS avg_latency_ms,
-            AVG(prompt_tokens)                         AS avg_prompt_tokens,
-            AVG(completion_tokens)                     AS avg_completion_tokens,
-            AVG(reasoning_tokens)                      AS avg_reasoning_tokens,
+            AVG(CASE WHEN kind = 'turn' THEN latency_ms END)       AS avg_latency_ms,
+            AVG(CASE WHEN kind = 'turn' THEN prompt_tokens END)    AS avg_prompt_tokens,
+            AVG(CASE WHEN kind = 'turn' THEN completion_tokens END) AS avg_completion_tokens,
+            AVG(CASE WHEN kind = 'turn' THEN reasoning_tokens END) AS avg_reasoning_tokens,
             SUM(cache_hit_tokens)                      AS cache_hit_tokens,
             SUM(cache_miss_tokens)                     AS cache_miss_tokens,
             SUM(prompt_tokens + completion_tokens)     AS total_tokens,
             SUM(tool_rounds)                           AS tool_rounds,
             SUM(cache_hits)                            AS tool_cache_hits,
-            AVG(provider_calls)                        AS avg_provider_calls,
+            AVG(CASE WHEN kind = 'turn' THEN provider_calls END)   AS avg_provider_calls,
             SUM(subagent_calls)                        AS subagent_calls,
             SUM(subagent_prompt_tokens + subagent_completion_tokens) AS subagent_tokens
         FROM turn_metrics
@@ -165,6 +171,7 @@ def summary(days: int = 7) -> dict[str, Any]:
     miss = row["cache_miss_tokens"] or 0
     return {
         "turns": row["turns"] or 0,
+        "reflections": row["reflections"] or 0,
         "errors": row["errors"] or 0,
         "avg_latency_ms": round(row["avg_latency_ms"] or 0.0, 1),
         "avg_prompt_tokens": round(row["avg_prompt_tokens"] or 0.0, 1),

@@ -35,6 +35,7 @@ class ToolContext:
     session_id: str
     customer_id: str | None
     emit: EventSink = _drop_event  # progress events for the customer's client, forwarded as they happen
+    turn_id: str = ""  # the turn (or SessionEnd pass) the call belongs to; memory rows record it as their source
 
 
 @dataclass(frozen=True)

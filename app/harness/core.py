@@ -15,6 +15,7 @@ import os
 import queue
 import threading
 import time
+import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -28,6 +29,7 @@ from app.harness.hooks import (
     HookRegistry,
     Pause,
     Replace,
+    SessionEndContext,
     SessionStartContext,
     StopContext,
     ToolUseContext,
@@ -50,6 +52,8 @@ from app.metrics import TurnRecord, record_turn
 from app.paths import SKILLS_DIR
 from app.retrieval.index import DEFAULT_MILVUS_URI, KnowledgeIndex
 from app.tools import handoff, register_all
+
+log = logging.getLogger(__name__)
 
 FRIENDLY_FAILURE = (
     "I'm sorry — I couldn't finish that reply just now. "
@@ -78,6 +82,14 @@ class NothingPending(LookupError):
     """A confirmation arrived for a session with no handoff waiting for one."""
 
 
+class UnknownSession(LookupError):
+    """A request named a session that was never started."""
+
+
+class SessionEnded(ValueError):
+    """The customer ended this conversation; it takes no more turns and cannot be ended twice."""
+
+
 @dataclass(frozen=True)
 class HarnessConfig:
     main_model: str = "deepseek-v4-pro"
@@ -88,8 +100,9 @@ class HarnessConfig:
     result_cap_chars: int = 6000  # ≈1.5K tokens; larger tool results are truncated
     tool_cache_ttl_seconds: float = 900.0
     milvus_uri: str = DEFAULT_MILVUS_URI
-    sub_model: str = "deepseek-flash"  # sub-agents (research, later reflection)
+    sub_model: str = "deepseek-flash"  # sub-agents: research, reflection
     subagent_max_rounds: int = 3
+    memory_limit: int = 12  # active Customer Memory facts rendered into the customer block at SessionStart
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -104,6 +117,7 @@ class HarnessConfig:
             milvus_uri=os.environ.get("MILVUS_URI", cls.milvus_uri),
             sub_model=os.environ.get("HARNESS_SUB_MODEL", cls.sub_model),
             subagent_max_rounds=int(os.environ.get("HARNESS_SUBAGENT_MAX_ROUNDS", cls.subagent_max_rounds)),
+            memory_limit=int(os.environ.get("HARNESS_MEMORY_LIMIT", cls.memory_limit)),
         )
 
 
@@ -226,6 +240,29 @@ class Harness:
         turn = TurnState(session_id=session_id, customer_id=session["customer_id"])
         yield from self._loop(session, turn, messages, new_messages=[])
 
+    def end_session(self, session_id: str) -> dict[str, Any]:
+        """SessionEnd: the customer is done. The session takes no more turns; reflection keeps what was learned."""
+        session = database.load_session(session_id)
+        if session is None:
+            raise UnknownSession(session_id)
+        if not database.end_session(session_id):
+            raise SessionEnded(session_id)
+        # Marked ended first, so a message racing the reflection is refused rather than forgotten.
+        # From here on nothing may fail the request: the session is ended, and cannot be ended again.
+        summary: dict[str, Any] = {"session_id": session_id, "reflected": False, "remembered": 0, "merged": 0}
+        try:
+            customer_id = session["customer_id"]
+            ctx = SessionEndContext(
+                session_id=session_id, customer_id=customer_id, pass_id=uuid.uuid4().hex,
+                working_memory=self._settled_working_memory(session_id),
+                memories=database.active_memories(customer_id) if customer_id else [],
+            )
+            summary.update(self.hooks.run_session_end(ctx))
+        except Exception as exc:  # noqa: BLE001 — the customer is gone; report, do not fail
+            log.warning("SessionEnd for %s did not complete", session_id, exc_info=True)
+            summary["error"] = f"{type(exc).__name__}: {exc}"[:500]
+        return summary
+
     def _settled_working_memory(self, session_id: str) -> list[dict[str, Any]]:
         """Working memory with every proposal answered and every tool call resulted — a valid transcript.
 
@@ -263,7 +300,7 @@ class Harness:
         """Request → tool rounds → reply. `new_messages` is what this turn appends to working memory."""
         session_id = turn.session_id
         tool_definitions = self.tools.definitions()
-        turn_id = uuid.uuid4().hex
+        turn_id = turn.turn_id
         started = time.perf_counter()
         books = _Books(model=self.config.main_model)
         announced_thinking = False
@@ -485,7 +522,9 @@ class Harness:
         """
         progress: queue.Queue[TurnEvent | None] = queue.Queue()
         outcome: dict[str, Any] = {}
-        tool_ctx = ToolContext(turn.session_id, turn.customer_id, emit=lambda name, data: progress.put(TurnEvent(name, data)))
+        tool_ctx = ToolContext(
+            turn.session_id, turn.customer_id, emit=lambda name, data: progress.put(TurnEvent(name, data)), turn_id=turn.turn_id,
+        )
 
         def work() -> None:
             try:
@@ -508,6 +547,8 @@ class Harness:
         session = database.load_session(session_id)
         if session is None:
             return self._start_session(session_id, customer_id)
+        if session["ended_at"]:
+            raise SessionEnded(session_id)
         if customer_id and customer_id != session["customer_id"]:
             raise SessionCustomerMismatch(
                 f"session {session_id} belongs to customer {session['customer_id']!r}, not {customer_id!r}"
@@ -524,6 +565,7 @@ class Harness:
             customer_id=customer_id or None,
             profile=profile,
             product_usage=database.get_customer_product_usage(customer_id) if profile else [],
+            memories=database.active_memories(customer_id, limit=self.config.memory_limit) if profile else [],
         )
         block = "\n\n".join(self.hooks.run_session_start(ctx))
         return database.create_session(session_id, ctx.customer_id, block)
@@ -534,4 +576,4 @@ def _tool_message(call: ToolCall, content: str) -> dict[str, Any]:
 
 
 def _profile_hook(ctx: SessionStartContext) -> str:
-    return prompt.customer_block(ctx.profile, ctx.product_usage)
+    return prompt.customer_block(ctx.profile, ctx.product_usage, ctx.memories)

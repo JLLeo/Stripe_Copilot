@@ -45,12 +45,13 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
 synchronous endpoint, keeps only the last one.
 
 1. **Session binding.** An unseen `session_id` triggers **SessionStart**: the Customer
-   Profile and product usage are loaded from the seed database and the SessionStart
-   hooks render the customer block, which is frozen into the `sessions` row. Later
-   turns reuse that exact text, so the block can never drift mid-session
-   ([ADR 0005](docs/adr/0005-append-only-prompt-prefix.md)). A session with no
-   `customer_id` is a Prospect: its block says nothing is known yet and points at the
-   `discovery` skill and `capture_lead`.
+   Profile, product usage and the most recent active Customer Memory (at most
+   `memory_limit`, 12) are loaded and the SessionStart hooks render the customer block,
+   which is frozen into the `sessions` row. Later turns reuse that exact text, so the
+   block can never drift mid-session ([ADR 0005](docs/adr/0005-append-only-prompt-prefix.md)).
+   A session with no `customer_id` is a Prospect: its block says nothing is known yet and
+   points at the `discovery` skill and `capture_lead`. A session the customer has ended
+   takes no more turns (`SessionEnded`, HTTP 409).
 2. **Request assembly** in the fixed order — see below.
 3. **Completion.** The Provider streams; the first reasoning delta is announced once
    as `thinking`, text deltas are **held**, and the final `Completed` event carries usage
@@ -90,7 +91,7 @@ If the customer disconnects mid-reply the turn is still metered (error
 
 `HarnessConfig` (main model `deepseek-v4-pro`, sub-agent model `deepseek-flash`,
 `max_tokens`, `thinking`, `skills_dir`, `tool_round_budget`, `subagent_max_rounds`,
-`result_cap_chars`, `tool_cache_ttl_seconds`, `milvus_uri`) is read from `HARNESS_*`
+`result_cap_chars`, `tool_cache_ttl_seconds`, `memory_limit`, `milvus_uri`) is read from `HARNESS_*`
 environment variables. Session binding is strict: an unknown
 `customer_id` is refused (HTTP 404) rather than downgraded to a prospect, and a session
 never switches customer (HTTP 409).
@@ -103,11 +104,13 @@ Every request is built in this order and only this order:
 |---|---|---|
 | `messages[0]` system | **Static prompt**: role, conduct (mirror the customer's language, admit being an AI, decline out-of-scope), the never-do list (no custom pricing, no roadmap promises, no tax/legal advice, no security documents, no fraud guarantees, no internal guidance), the active rows of `sales_policy_updates` sorted by area and title, then the **skill index** — one line per skill, descriptions only | identical for every session in the process; rendered once at startup |
 | `tools` | tool definitions from the registry, in registration order: `Skill`, `get_my_profile`, `list_products`, `get_pricing` | identical for every request in the process |
-| `messages[1]` system | **Customer block**: profile fields and products in use, or the prospect notice | identical for the life of the session |
+| `messages[1]` system | **Customer block**: profile fields, products in use and the active Customer Memory as `[m<id>] kind — fact` lines, or the prospect notice | identical for the life of the session |
 | `messages[2:]` | working memory, oldest first, then the new customer message | append-only |
 
-No dates, timestamps, or identifiers appear anywhere before the newest message; a test
-asserts the serialized prefix is byte-identical between consecutive turns. On the live
+No dates, timestamps, or per-request identifiers appear anywhere before the newest
+message — the `[m<id>]` tags are stable fact ids, fixed in the frozen block for the life
+of the session — and a test asserts the serialized prefix is byte-identical between
+consecutive turns, including across a turn that remembers a new fact. On the live
 model this gives cache hits from the second turn onward (see README, "Measured").
 
 ### Skills — `skills.py`, `skills/<name>/SKILL.md`
@@ -149,6 +152,7 @@ Results are compact JSON — they live in every later request of the session.
 | `request_handoff(team, reason, evidence)` | `handoffs` (runtime) | never runs inside a turn: `handoff_confirmation` pauses first, and the customer's answer produces its result (see Handoff) |
 | `ask_customer(question, options[])` | — | writes its result at once and **ends the turn** (`EndTurn` on the result): the harness emits `ask_customer`, gives the round's other calls a "not run" result, and makes the question the reply; the customer's click is their next message. 2–5 distinct options, else feedback |
 | `capture_lead(company?, business_model?, annual_volume_usd?, timeline?, needs?, qualification_notes?, recommended_products?)` | `leads` (runtime) | upsert keyed by session: `COALESCE(new, old)` per column, so a call adds or corrects what it names and keeps the rest; returns the whole lead plus `still_unknown`. Volume is stored as whole dollars a year. Not cacheable |
+| `remember(kind, fact, replaces?)` | `customer_memory` (runtime) | inserts an active row (`source = remember`, confidence 0.9, `source_turn` = the turn id); `replaces` marks that active row `superseded` by the new one, or `retracted` when the fact is empty. Rows are never edited; a wrong id or kind is feedback and nothing is written. Not cacheable |
 
 ### Sub-agents — `subagent.py`, `app/tools/research.py`
 
@@ -196,7 +200,9 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
   relied on; `tool_cache_store` skips results that came from the cache.
 - **Stop** hooks receive the final reply and may `Deny(feedback)`; the first denial wins
   and is recorded as `stop_denied` (and `stop_gave_up` when the rewrites run out).
-- `SessionEnd` gains its dispatcher with *#10*.
+- **SessionEnd** hooks receive the settled working memory and the customer's active
+  facts and return what they did; the dicts are merged into the response of
+  `/sales-agent/end`. `reflection` is the one hook registered.
 
 | Guardrail | Hook | Rule |
 |---|---|---|
@@ -208,6 +214,7 @@ the tool cache is not booked as a new delegation. The same runner will serve Ref
 | `handoff_validity` | PreToolUse | `request_handoff` with an unknown team, empty evidence, or evidence that matches nothing the customer said (a passage, or ≥60% of its whole words) and names no actual profile value is denied with feedback — field names alone never count |
 | `enterprise_volume` | PreToolUse | a customer whose profile shows more than $10M annual payment volume — or a prospect whose lead does — can only be handed to Enterprise Sales; anything else is denied with feedback naming the rule |
 | `prospect_only` | PreToolUse | `capture_lead` in a session bound to a customer is denied with feedback: a Lead is the record of a Prospect, and a signed-in customer already has a profile |
+| `customer_only` | PreToolUse | `remember` in a prospect session is denied with feedback pointing at `capture_lead`: Customer Memory belongs to a customer |
 | `handoff_confirmation` | PreToolUse | every valid `request_handoff` creates a pending `handoffs` row and pauses the turn with `handoff_pending` |
 | `anti_placeholder` | Stop | a reply containing an unfilled placeholder — `[Customer Name]`, `[Insert …]`, `<your email>`, `{{ template }}`, `TBD` — is sent back; source citations like `[Stripe Checkout]` and markdown links are not placeholders |
 | `internal_canary` | Stop | a reply containing any marker of Internal Knowledge is sent back. Markers are a curated list ("INTERNAL ONLY", "Discount Ranges", "VP of Sales", …) plus, derived at first use from the non-public documents, their section headings of three words or more and their percentage ranges — minus anything a public document also says (public and internal documents share their section structure, and "buy-rates" or "do not share" appear in public text), so an honest answer is never sent back. `leaks(text)` exposes the same check for tests and evaluation; this is the one place outside ingestion that opens those files, and nothing read is ever sent to a model — it is a blocklist |
@@ -254,6 +261,44 @@ documents' approved client-facing wording — no thresholds, discount ranges, ap
 workflows, competitor tactics or segmentation tables
 ([ADR 0003](docs/adr/0003-internal-knowledge-never-enters-customer-context.md)). A test
 loads them and asserts the prompt stays free of internal markers.
+
+### Customer Memory and Reflection — `app/tools/memory.py`
+
+Customer Memory is a `customer_memory` row per fact: `kind ∈ {need, objection,
+preference, commitment, stage}`, the fact, `source_turn`, `source ∈ {remember,
+reflection}`, confidence, `status ∈ {active, superseded, retracted}`, `superseded_by`,
+created and updated times. Facts are never edited in place: a correction is a new row
+that supersedes the old one, a retraction settles the old one, and only `active` rows
+are ever rendered — so what the model saw in any earlier session can be traced. One
+write path, `write_memory()`, serves both the tool and reflection: it validates the kind
+and every `replaces` id before writing anything, and refuses to add a fact identical to an
+active one of the same kind (the existing row comes back marked duplicate), so "merges
+duplicates" does not rest on the model alone.
+
+`remember` writes during the conversation. At SessionStart the most recent active facts
+(`memory_limit`, 12) enter the customer block as `[m<id>] kind — fact` lines, ordered
+most recently updated first, low-confidence ones marked "(unconfirmed)"; the ids are what
+the model passes as `replaces`. A fact remembered mid-session reaches the model only as
+the tool's result in working memory — the block is frozen, so the prefix stays
+byte-identical (ADR 0005; `test_a_mid_session_remember_leaves_the_prefix_unchanged`).
+
+`Harness.end_session()` is SessionEnd. It marks the session ended first — a message
+racing the reflection is refused rather than forgotten — settles working memory
+(pending handoffs declined, dangling calls closed), and runs the SessionEnd hooks. The
+`reflection` hook is the second use of the sub-agent runner: a `SubagentSpec` on the
+sub-agent model with one tool, `save_memories(memories[])`, and a one-round cap. Its task
+is the customer's name, the facts already on file with ids, and the conversation as the
+customer and agent had it (user and assistant text only, Stop-hook feedback excluded,
+the last 60K characters of a very long session). The system prompt says what each kind
+means, to save only what the customer stated or decided, to pass `replaces` for a fact
+the conversation refines or contradicts (or both ids for two facts that say the same
+thing), and to reply "nothing new" without calling the tool when there is nothing to
+keep. Every saved fact is `source = reflection` with the model's confidence. The pass is
+booked as a `turn_metrics` row of `kind = session_end` — sub-agent tokens, calls and
+rounds, `hooks_json = {reflected, merged}`, the error if the sub-agent failed — and a
+failed reflection still ends the session; once the session is marked ended nothing in the
+pass can fail the request (an error is reported in the response instead). A prospect session ends without reflection:
+its facts are the Lead.
 
 ### Prospects and leads — `app/tools/lead.py`, `skills/discovery/SKILL.md`
 
@@ -305,10 +350,11 @@ its own on `app.state.harness` first.
 | Endpoint | Behaviour |
 |---|---|
 | `POST /sales-agent/chat` | runs a turn, returns the `done`/`error` payload as `ChatResponse` |
+| `POST /sales-agent/end` | `{session_id}` → `Harness.end_session()`; `EndSessionResponse {session_id, reflected, remembered, merged}`; 404 unknown session, 409 already ended. A turn on an ended session is 409 |
 | `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
 | `GET /api/customers` | sign-in selector: a `New prospect` entry (`customer_id: null, prospect: true`) first, then every customer with `prospect: false` |
 | `GET /api/leads?limit=N` | leads most recently updated first, `recommended_products` decoded |
-| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn, handoffs, leads captured; `tool_usage()` — calls per tool |
+| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn, handoffs, leads captured, reflection passes; `tool_usage()` — calls per tool |
 
 `done` carries `sources` — the `(title, url)` pairs collected by `source_extraction` — and the UI renders them as links under the reply; `/sales-agent/chat` returns them in `ChatResponse.sources`.
 | `GET /` | the chat UI |
@@ -316,8 +362,9 @@ its own on `app.state.harness` first.
 The UI (`static/index.html`) is a single page: a sign-in-as-customer / new-prospect selector, a
 streamed conversation with a Claude Code-style activity list above each reply (one row
 per tool call: skill loaded, result size, cached, or blocked-by-hook), and per-reply
-latency / token / cache-hit / tool-round figures. The session id lives in
-`localStorage` per customer.
+latency / token / cache-hit / tool-round figures. **End conversation** posts to
+`/sales-agent/end` and starts a fresh session with a note on how many facts were kept.
+The session id lives in `localStorage` per customer.
 
 ## Data layer
 
@@ -333,10 +380,11 @@ gitignored and created on first start.
 | seed | `stripe_products` (26) | product catalogue |
 | seed | `customer_product_usage` (81) | products in use per customer |
 | seed | `sales_policy_updates` (20) | the policy register rendered into the static prompt |
-| runtime | `sessions` | session → customer binding and the frozen customer block |
+| runtime | `sessions` | session → customer binding, the frozen customer block, `ended_at` once the customer ends it (added in place to older runtime databases) |
 | runtime | `messages` | working memory, one row per message, insert-only |
 | runtime | `handoffs` | one row per proposed handoff: session, customer, team, reason, evidence, `pending` → `confirmed` / `declined` / `abandoned` |
 | runtime | `leads` | one row per prospect session (`session_id` unique): company, business model, annual volume, timeline, needs, qualification notes, recommended products, created / updated |
+| runtime | `customer_memory` | one row per fact: customer, kind, fact, source turn, source, confidence, status, superseded_by, created / updated |
 | runtime | `turn_metrics` | one row per turn |
 
 `get_connection()` opens the runtime file as the main database (`WAL`,
@@ -422,13 +470,13 @@ older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the sche
 average latency, average prompt / completion / reasoning tokens, total cache hit and
 miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits,
 provider calls per turn, sub-agent delegations and tokens, handoffs confirmed and
-declined, and leads captured; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Prompt-cache hit rate is a
+declined, leads captured, and reflection passes; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Rows have a `kind`: `turn`, or `session_end` for a reflection pass, which carries sub-agent tokens only and is left out of the per-turn averages. Prompt-cache hit rate is a
 first-class number because the prefix discipline in ADR 0005 is easy to break by
 accident and this is where a break shows first.
 
 ## Testing
 
-130 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~19 s. The app under test
+144 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~19 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys.
 
@@ -443,7 +491,6 @@ OpenAI client. Evaluation runs against the real provider *arrive with #12*.
 
 | Ticket | Adds |
 |---|---|
-| #10 | Customer Memory and Reflection |
 | #11 | attachments, tool-result clearing, compaction with hysteresis |
 | #12 | evaluation suite |
 | #13 | final documentation pass |

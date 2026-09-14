@@ -84,6 +84,7 @@
   .hint { max-width: 820px; margin: 8px auto 0; color: var(--muted); font-size: 12px; display: flex; gap: 16px; }
   .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
   .empty strong { color: var(--text); display: block; font-size: 18px; margin-bottom: 8px; }
+  .empty .note { display: block; margin-top: 14px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -92,6 +93,7 @@
   <div class="spacer"></div>
   <label for="customer">Signed in as</label>
   <select id="customer"><option value="">Loading customers…</option></select>
+  <button id="end-chat" title="End this conversation — the agent keeps what it learned for next time">End conversation</button>
   <button id="new-chat" title="Start a fresh conversation">New conversation</button>
 </header>
 
@@ -121,17 +123,17 @@
   };
   const newSessionId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 
-  function startSession(customerId, { fresh } = { fresh: false }) {
+  function startSession(customerId, { fresh = false, note = "" } = {}) {
     state.customerId = customerId || null;
     state.sessionId = fresh ? newSessionId() : (store.get("session:" + (customerId || "prospect")) || newSessionId());
     store.set("session:" + (customerId || "prospect"), state.sessionId);
     store.set("customer", customerId || "");
     $("session-label").textContent = "session " + state.sessionId.slice(0, 8);
     thread.innerHTML = "";
-    empty();
+    empty(note);
   }
 
-  function empty() {
+  function empty(note) {
     const div = document.createElement("div");
     div.className = "empty";
     if (!state.customerId) {
@@ -140,7 +142,36 @@
       const name = customerSel.selectedOptions[0]?.textContent || "there";
       div.innerHTML = `<strong>Hi ${escapeHtml(name.split(" — ")[0])}.</strong>Ask me anything about Stripe — what a product does, what it costs, or what would fit your business.`;
     }
+    if (note) { const n = document.createElement("span"); n.className = "note"; n.textContent = note; div.appendChild(n); }
     thread.appendChild(div);
+  }
+
+  // --- ending the conversation: SessionEnd keeps what was learned, then a fresh session ----
+  async function endSession() {
+    if (state.busy) return;
+    state.busy = true; send.disabled = true;
+    try { await endSessionNow(); } finally { state.busy = false; send.disabled = false; input.focus(); }
+  }
+
+  async function endSessionNow() {
+    const customerId = customerSel.value;
+    let note = "";
+    try {
+      const res = await fetch("/sales-agent/end", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: state.sessionId }) });
+      if (res.ok) {
+        const r = await res.json();
+        note = !state.customerId ? "Previous conversation ended."
+          : r.reflected ? `Previous conversation ended — ${r.remembered} new ${r.remembered === 1 ? "thing" : "things"} remembered for next time.`
+          : "Previous conversation ended.";
+      } else if (res.status !== 404 && res.status !== 409) {  // 404: never started; 409: already ended — both mean "start fresh"
+        $("session-label").textContent = `couldn't end the conversation (HTTP ${res.status}) — try again`;
+        return;
+      }
+    } catch {
+      $("session-label").textContent = "couldn't reach the agent to end the conversation — try again";
+      return;
+    }
+    startSession(customerId, { fresh: true, note });
   }
 
   // --- rendering -----------------------------------------------------------
@@ -316,6 +347,7 @@
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(input.value); } });
   send.addEventListener("click", () => ask(input.value));
   $("new-chat").addEventListener("click", () => startSession(customerSel.value, { fresh: true }));
+  $("end-chat").addEventListener("click", endSession);
   customerSel.addEventListener("change", () => startSession(customerSel.value));
 
   fetch("/api/customers").then((r) => r.json()).then((rows) => {

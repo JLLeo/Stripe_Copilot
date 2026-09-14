@@ -6,7 +6,7 @@ Seed database   (tracked, read-only)   data/seed.db
     Rebuild from data.xlsx with:  python scripts/build_seed_db.py
 
 Runtime database (ignored, read-write)  data/runtime.db
-    sessions, messages, handoffs, leads, turn_metrics — everything the agent writes.
+    sessions, messages, handoffs, leads, customer_memory, turn_metrics — everything the agent writes.
     Created on first start.
 
 Callers never learn which table lives where: the runtime database is the main
@@ -46,6 +46,7 @@ RUNTIME_TABLES: tuple[str, ...] = (
     "messages",
     "handoffs",
     "leads",
+    "customer_memory",
     "turn_metrics",  # DDL lives in app.metrics.init_metrics; ownership is recorded here.
 )
 
@@ -127,9 +128,12 @@ def init_db() -> None:
             session_id      TEXT PRIMARY KEY,
             customer_id     TEXT,
             customer_block  TEXT NOT NULL,
-            created_at      TEXT NOT NULL
+            created_at      TEXT NOT NULL,
+            ended_at        TEXT
         )
     """)
+    if "ended_at" not in {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}:
+        conn.execute("ALTER TABLE sessions ADD COLUMN ended_at TEXT")  # runtime databases from before SessionEnd
     # Working memory: one row per message, only ever inserted (ADR 0005).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -177,6 +181,24 @@ def init_db() -> None:
             updated_at                 TEXT NOT NULL
         )
     """)
+    # Customer Memory: durable facts that outlive a session. A fact is never edited in
+    # place — a correction writes a new row and marks the old one superseded.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS customer_memory (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id    TEXT NOT NULL,
+            kind           TEXT NOT NULL,   -- need | objection | preference | commitment | stage
+            fact           TEXT NOT NULL,
+            source_turn    TEXT NOT NULL,   -- the turn (or SessionEnd pass) that wrote it
+            source         TEXT NOT NULL,   -- remember | reflection
+            confidence     REAL NOT NULL,
+            status         TEXT NOT NULL,   -- active | superseded | retracted
+            superseded_by  INTEGER,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_customer ON customer_memory(customer_id, status)")
     conn.commit()
 
 
@@ -190,10 +212,18 @@ def _now() -> str:
 def load_session(session_id: str) -> dict[str, Any] | None:
     """Session binding and its SessionStart customer block, or None if unseen."""
     row = get_connection().execute(
-        "SELECT session_id, customer_id, customer_block, created_at FROM sessions WHERE session_id = ?",
+        "SELECT session_id, customer_id, customer_block, created_at, ended_at FROM sessions WHERE session_id = ?",
         (session_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def end_session(session_id: str) -> bool:
+    """Mark the session ended. False if it already was — the customer can end a conversation once."""
+    conn = get_connection()
+    cur = conn.execute("UPDATE sessions SET ended_at = ? WHERE session_id = ? AND ended_at IS NULL", (_now(), session_id))
+    conn.commit()
+    return cur.rowcount == 1
 
 
 def create_session(session_id: str, customer_id: str | None, customer_block: str) -> dict[str, Any]:
@@ -367,6 +397,64 @@ def annual_payment_volume(session_id: str, customer_id: str | None) -> int:
     if customer_id:
         return int((get_customer(customer_id) or {}).get("annual_payment_volume") or 0)
     return int((get_lead(session_id) or {}).get("annual_volume_usd") or 0)
+
+
+# ---------------------------------------------------------------------------
+# Customer Memory
+# ---------------------------------------------------------------------------
+MEMORY_KINDS = ("need", "objection", "preference", "commitment", "stage")
+MEMORY_ACTIVE = "active"
+MEMORY_SUPERSEDED = "superseded"  # a later fact replaced it
+MEMORY_RETRACTED = "retracted"  # the customer said it was wrong or no longer true
+
+
+def add_memory(customer_id: str, *, kind: str, fact: str, source_turn: str, source: str, confidence: float) -> dict[str, Any]:
+    conn = get_connection()
+    now = _now()
+    cur = conn.execute(
+        """
+        INSERT INTO customer_memory (customer_id, kind, fact, source_turn, source, confidence, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (customer_id, kind, fact, source_turn, source, confidence, MEMORY_ACTIVE, now, now),
+    )
+    conn.commit()
+    return get_memory(int(cur.lastrowid))  # type: ignore[return-value]
+
+
+def get_memory(memory_id: int) -> dict[str, Any] | None:
+    row = get_connection().execute("SELECT * FROM customer_memory WHERE id = ?", (memory_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def active_memories(customer_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+    """The facts currently believed about a customer, most recently updated first."""
+    sql = "SELECT * FROM customer_memory WHERE customer_id = ? AND status = ? ORDER BY updated_at DESC, id DESC"
+    params: tuple[Any, ...] = (customer_id, MEMORY_ACTIVE)
+    if limit is not None:
+        sql += " LIMIT ?"
+        params += (limit,)
+    return [dict(r) for r in get_connection().execute(sql, params).fetchall()]
+
+
+def _settle_memory(memory_id: int, customer_id: str, status: str, superseded_by: int | None) -> bool:
+    """Move an active fact to `status`. False if it is not this customer's or no longer active."""
+    conn = get_connection()
+    cur = conn.execute(
+        "UPDATE customer_memory SET status = ?, superseded_by = ?, updated_at = ? "
+        "WHERE id = ? AND customer_id = ? AND status = ?",
+        (status, superseded_by, _now(), memory_id, customer_id, MEMORY_ACTIVE),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def supersede_memory(memory_id: int, customer_id: str, *, by: int) -> bool:
+    return _settle_memory(memory_id, customer_id, MEMORY_SUPERSEDED, by)
+
+
+def retract_memory(memory_id: int, customer_id: str) -> bool:
+    return _settle_memory(memory_id, customer_id, MEMORY_RETRACTED, None)
 
 
 def dangling_tool_call_ids(working_memory: list[dict[str, Any]]) -> list[str]:

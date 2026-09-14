@@ -19,10 +19,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from app.database import get_connection, init_db
 from app import database
-from app.harness.core import Harness, NothingPending, SessionCustomerMismatch, TurnEvent, UnknownCustomer
+from app.harness.core import Harness, NothingPending, SessionCustomerMismatch, SessionEnded, TurnEvent, UnknownCustomer, UnknownSession
 from app.harness.deepseek import DeepSeekProvider
 from app.metrics import init_metrics, summary, tool_usage
-from app.schemas import ChatRequest, ChatResponse, ConfirmHandoffRequest
+from app.schemas import ChatRequest, ChatResponse, ConfirmHandoffRequest, EndSessionRequest, EndSessionResponse
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -107,6 +107,8 @@ def _run(request: Request, body: ChatRequest):
         raise HTTPException(status_code=404, detail=f"unknown customer {exc}") from exc
     except SessionCustomerMismatch as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionEnded as exc:
+        raise HTTPException(status_code=409, detail=f"session {exc} has ended; start a new conversation") from exc
     except StopIteration:
         return
     yield first
@@ -148,6 +150,17 @@ def confirm_handoff(body: ConfirmHandoffRequest, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/sales-agent/end", response_model=EndSessionResponse)
+def end_session(body: EndSessionRequest, request: Request):
+    """The customer ends the conversation: SessionEnd runs reflection and the session takes no more turns."""
+    try:
+        return EndSessionResponse(**_harness(request).end_session(body.session_id))
+    except UnknownSession as exc:
+        raise HTTPException(status_code=404, detail=f"unknown session {exc}") from exc
+    except SessionEnded as exc:
+        raise HTTPException(status_code=409, detail=f"session {exc} has already ended") from exc
 
 
 # ---------------------------------------------------------------------------
