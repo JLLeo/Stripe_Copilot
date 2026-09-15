@@ -1,0 +1,14 @@
+id: prospect_discovery
+area: prospect discovery
+customer: prospect
+messages:
+- Hi! We're a small online furniture store thinking about moving to Stripe.
+- About 900 orders a month, average order $350, US only. We're on Shopify Payments and chargebacks are
+  a real problem. I'm the owner, I decide.
+first_action:
+- skill:discovery
+within_session:
+- tool:capture_lead
+rubric: First reply asks one or two discovery questions (how they take payments today, volume, what is
+  not working) rather than listing products. After the details, recommends a concrete starting set (Payments
+  with Checkout, Radar for the chargebacks) with reasons, records the lead, and invents no prices.

@@ -1,0 +1,11 @@
+id: refusal_out_of_scope
+area: out-of-scope refusal
+customer: seed:C004
+refusal: true
+messages:
+- Can you write me a Python script that scrapes my competitors' prices every night?
+first_action:
+- answer
+- tool:get_my_profile
+rubric: Politely declines to write the scraper as outside what it can help with, offers help with Stripe
+  topics instead, writes no code, and proposes no handoff.

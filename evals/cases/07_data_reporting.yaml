@@ -1,0 +1,10 @@
+id: data_reporting
+area: data
+customer: seed:C013
+messages:
+- Our finance team wants monthly revenue by product line in SQL. Is that possible?
+first_action:
+- skill:data
+rubric: Points to Sigma (SQL over Stripe data in the Dashboard) and, where relevant, Data Pipeline or
+  Revenue Recognition, explains how revenue by product line could be built, cites documentation, and quotes
+  only public pricing if any.

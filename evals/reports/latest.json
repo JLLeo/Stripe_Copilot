@@ -1,0 +1,590 @@
+{
+ "summary": {
+  "cases": 19,
+  "cases_defined": 19,
+  "passed": 19,
+  "first_action_matched": 19,
+  "first_action_accuracy": 1.0,
+  "leak_free": 19,
+  "judged": 19,
+  "mean_judge_score": 4.5,
+  "errors": 0
+ },
+ "model": "deepseek-v4-pro",
+ "judge_model": "deepseek-flash",
+ "results": [
+  {
+   "id": "payments_wallets",
+   "expected_first": [
+    "skill:payments",
+    "tool:search_knowledge"
+   ],
+   "first_actions": [
+    "skill:payments",
+    "tool:search_knowledge"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply correctly confirms Checkout supports Apple Pay and Google Pay out of the box, accurately explains enabling via Dashboard payment method settings with the domain-registration nuance scoped to embedded/Elements forms, cites documentation, and invents no limits, fees, or countries.",
+   "replies": [
+    "Yes — Stripe Checkout supports both Apple Pay and Google Pay out of the box, and they're great for your \"fast checkout\" goal since they skip manual card entry.\n\nFor the standard Stripe-hosted Checkout page you're on, there's essentially nothing to build: with **dynamic payment methods**, Apple Pay and Google Pay are shown automatically to shoppers on compatible devices and browsers (source: [Stripe Checkout](https://docs.stripe.com/payments/checkout), [Payment Methods](https://docs.stripe.com/payments/payment-methods)).\n\nThe only thing to do is a quick check in the Dashboard:\n\n1. Go to **Settings → Payment methods**\n2. Confirm **Apple Pay** and **Google Pay** are toggled on\n\nIf they're on, they're already live. Note: Apple Pay needs no extra domain setup on the Stripe-hosted page — that only comes up if you later move to a custom domain or an embedded/Elements form.\n\nGiven your focus on conversion, I'd make sure **Link** is also enabled (you already have it, but volume is low) — it gives returning customers a one-click, saved-details experience that pairs well with the wallets. Want me to walk through where those toggles live, or look at anything else on your checkout?"
+   ],
+   "latency_ms": 17799,
+   "area": "payments",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "billing_usage_based",
+   "expected_first": [
+    "skill:billing"
+   ],
+   "first_actions": [
+    "skill:billing",
+    "tool:search_knowledge"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.5,
+   "judge_scores": [
+    5,
+    4
+   ],
+   "judge_reason": "The agent asks a relevant clarifying question about the platform fee before answering, which is an appropriate next step, though the rubric specifically calls for asking how usage is tracked or billed; it remains on topic and safe.",
+   "replies": [
+    "Yes — Stripe Billing can meter usage and bill monthly. It supports usage-based (metered) pricing as a first-class model, so you can charge based on API calls, compute, seats-plus-usage hybrids, etc., on daily, weekly, monthly, quarterly, or annual billing periods ([Stripe Billing Overview](https://docs.stripe.com/billing)).\n\nHow it works in practice:\n- You define a **metered price** on a subscription (e.g., $X per API call, or tiered pricing as volume grows).\n- Your app reports usage to Stripe — either via the **Usage Records API** or high-throughput **Meter Events** for streaming/large-volume usage.\n- At the end of each monthly cycle, Stripe invoices for actual usage automatically.\n\nOne honest note for your setup: the hosted pieces (Pricing Table, Customer Portal) are no-code, but *reporting usage* does require some integration — your product needs to send Stripe the usage numbers. It's a light API integration, not a billing rebuild, and it can be done from the Dashboard for manual adjustments too.\n\nFor a direct-sales API product like yours, the typical fit is: metered pricing + monthly invoicing with cards auto-charged, and the Customer Portal so customers self-serve on payment methods.\n\nWant me to walk through the recommended pricing model (flat + per-unit vs. tiered) or what Billing costs at your volume?",
+    "What does the platform fee look like on top of usage?"
+   ],
+   "latency_ms": 25174,
+   "area": "billing",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "connect_marketplace",
+   "expected_first": [
+    "skill:connect"
+   ],
+   "first_actions": [
+    "skill:connect",
+    "tool:get_my_profile"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Solutions Engineering",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.5,
+   "judge_scores": [
+    5,
+    4
+   ],
+   "judge_reason": "Reply correctly recommends Connect, explains hosted onboarding, commission handling and weekly payouts, and cites documentation, but the cross-border payout fee detail is deferred to an SE rather than sourced, a minor gap; it also doesn't re-quote public Connect pricing but doesn't need to.",
+   "replies": [
+    "That's a classic **Connect marketplace** setup, and it maps cleanly to what you described. Here's how it works:\n\n**The flow, on a $49 order:**\n1. Buyer pays on your platform — Stripe processes the card (2.9% + $0.30 for US cards).\n2. You keep your **10% commission** as an \"application fee\" on the charge.\n3. The remaining 90% lands in the seller's connected account.\n4. Stripe pays that out to the seller's bank on a **weekly** schedule (daily, weekly, monthly, and manual are all supported).\n\n**Seller onboarding with minimal engineering:** I'd recommend **Express accounts** — Stripe hosts the seller signup, identity verification, and banking details, and you just share a link. You don't build or manage KYC yourself.\n\n**One honest caveat:** this isn't quite as no-code as Payment Links. You (or a developer) will need a small amount of code to create the charge, attach the 10% application fee, and trigger the transfer. That said, it's the standard, fastest path for exactly this model, and Express keeps the seller-side work off your plate.\n\n**Pricing:** Connect's pay-as-you-go has no monthly platform fee on top of standard processing; your 10% is your own margin, not a Stripe fee.\n\nA couple of things that would change the recommendation — so I can point you precisely:\n- Where are your **sellers** located (US only, or international)?\n- Are payouts in **USD only**, or other currencies too?\n\nIf sellers are cross-border or you want to set your own processing fees for them, I'd bring in a solutions engineer to design the flow with you.",
+    "Both US and Canadian sellers work with Connect, so your plan holds together. Here's the shape of it:\n\n- **US sellers:** onboarded via Stripe-hosted signup, paid weekly in **USD** to their US bank accounts.\n- **Canadian sellers:** onboarded the same way, and paid in **CAD** to Canadian banks (or USD if they hold a USD account). Connect supports international payouts, so the weekly cadence can apply to both — no separate process for you to run. ([docs.stripe.com/connect](https://docs.stripe.com/connect))\n- A **few hundred sellers** in year one is well within what Express accounts are built for.\n\nThe one place I don't want to approximate: when you collect in USD and pay out in CAD, there are currency-conversion fees and a few design choices — who bears the conversion, how seller bank details are handled, and how you reconcile the two currencies. That's exactly the kind of cross-border payout detail a solutions engineer should confirm for your setup rather than me giving you a rough number.\n\nI'd like to connect you with one to nail that down. Proposing that now:"
+   ],
+   "latency_ms": 58514,
+   "area": "connect",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "tax_cross_border",
+   "expected_first": [
+    "skill:tax"
+   ],
+   "first_actions": [
+    "skill:tax"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 3.5,
+   "judge_scores": [
+    3,
+    4
+   ],
+   "judge_reason": "Accurately explains checkout calculation/collection and correctly avoids giving tax advice by offering a specialist, but it emphasizes import VAT/duties and filing as the customer's responsibility without citing the specific Stripe Tax documentation for filing and slightly undersells what Stripe Tax does, so it's a minor gap rather than a fully specific rubric match.",
+   "replies": [
+    "Yes — Stripe Tax is built for exactly this. It automatically calculates the right tax on each transaction based on what you're selling and where the customer is located, covering EU VAT and Canadian GST/HST (plus US sales tax, UK VAT, AU/NZ GST and more). Since you already use Checkout, it slots right into your no-code setup without a new integration.\n\nA couple of things it also does:\n- **Threshold monitoring** — tracks your cumulative sales per jurisdiction and alerts you before you cross into needing to register somewhere new.\n- **Filing (Tax Complete)** — can prepare and file the returns for you, if you want it off your plate.\n\nPricing: **Tax Basic** is 0.5% per transaction where you're registered (no-code), or **Tax Complete** starts at $90/month on a one-year contract and includes calculation plus filing.\n\nOne important boundary: I can explain how Stripe Tax works and how it'd fit your store, but whether/where you need to register and how to treat specific sales is tax advice — for that I'd connect you with a tax specialist.\n\nTo point you in the right direction: are you selling **physical goods or digital goods**, and are you already registered for tax in Canada or any EU country?",
+    "Good — that changes the picture a bit, and it's worth being precise about what Stripe Tax does and doesn't cover for that scenario.\n\n**What Stripe Tax does:** it calculates and collects the right sales tax / VAT / GST at checkout, based on the product tax code (physical goods), the customer's location, and where you're registered. Once you're registered in a jurisdiction, it adds the correct amount and gives you the reporting for filing. That works in the Checkout you already use.\n\n**What it doesn't do:** for physical goods shipped internationally, there are also import VAT and customs duties handled at the border by customs and carriers. Stripe Tax doesn't calculate or collect those — that's a separate layer from the checkout tax.\n\nSo the honest answer is: Stripe Tax handles the **checkout calculation and collection** side well, but for furniture shipped from the US into Canada and the EU, whether you should be charging tax at checkout versus it being collected at import — and where you need to register — is tax advice I can't give you.\n\nThat's exactly what a Stripe tax specialist is for. Would you like me to connect you with one? They can work through your Canada/EU registration and import-VAT questions properly, and then I can help you get Stripe Tax set up on Checkout once you know where you need to be registered."
+   ],
+   "latency_ms": 48830,
+   "area": "tax",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "fraud_chargebacks",
+   "expected_first": [
+    "skill:fraud_protection"
+   ],
+   "first_actions": [
+    "skill:fraud_protection",
+    "tool:get_my_profile"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Risk / Fraud",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5,
+    5
+   ],
+   "judge_reason": "The reply asks the right clarifying question, then recommends Smart Disputes, Radar scoring/rules, 3D Secure, and dispute-reduction tactics tied to the 2% rate and friendly fraud, with documentation cited and no guarantee that disputes will stop.",
+   "replies": [
+    "What do most of your chargebacks look like — true fraud or customer disputes?",
+    "That split is actually good news — friendly fraud is fightable, and stolen cards can be filtered more aggressively without slowing down your good customers.\n\nHere's what I'd do, in order:\n\n**1. Turn on Smart Disputes for the friendly fraud.** Stripe automatically compiles your order and delivery evidence and responds to those \"didn't receive / not as described\" disputes for you. You pay 30% of the disputed amount and *only when you win* — so it's pure upside on cases you'd otherwise lose. This is the single highest-leverage fix for your situation. (Source: [Stripe Radar docs](https://docs.stripe.com/radar))\n\n**2. Reduce disputes at the source.** A clear billing descriptor (so customers recognize your charge), delivery confirmation/tracking on every order, and easy self-serve refunds all stop a lot of \"I didn't get it\" disputes before they're filed.\n\n**3. For the stolen cards, use 3D Secure selectively.** You're already getting Radar's risk scoring free. You can request extra authentication only on high-risk payments via Radar rules, so risky orders get an added check while your normal checkout stays fast — which protects your conversion focus. (Source: [Stripe Radar docs](https://docs.stripe.com/radar))\n\nOne honest note: 2% is well above the range card networks watch closely, and at your volume it's worth a proper look rather than just self-serve tweaks."
+   ],
+   "latency_ms": 43267,
+   "area": "fraud_protection",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "terminal_shops",
+   "expected_first": [
+    "skill:terminal"
+   ],
+   "first_actions": [
+    "skill:terminal",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 3.0,
+   "judge_scores": [
+    3
+   ],
+   "judge_reason": "Asking how staff will take payments is a reasonable clarifying question, but it does not yet name Terminal reader options or pricing, leaving most of the rubric unaddressed.",
+   "replies": [
+    "For your two shops, how will staff mostly take payments?"
+   ],
+   "latency_ms": 11664,
+   "area": "terminal",
+   "error": null,
+   "refusal_expected": false,
+   "refused": null
+  },
+  {
+   "id": "data_reporting",
+   "expected_first": [
+    "skill:data"
+   ],
+   "first_actions": [
+    "skill:data",
+    "tool:search_knowledge"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "Correctly points to Sigma for SQL over Stripe data, explains how to build revenue by product line via line items/metadata, cites documentation, and quotes public pricing without overstepping.",
+   "replies": [
+    "Yes — Stripe Sigma is the right tool for this. Your finance team can write ANSI SQL directly against your Stripe data (charges, refunds, line items) right in the Dashboard, and group revenue by month and product line.\n\nOne thing that determines how clean this is: **the product/SKU has to be in your Stripe data in the first place.** Since you're on Checkout, that means passing line items or `metadata` (e.g., `product_line`) on each checkout. If you're doing that today, a Sigma query can sum by month and group by that value. If not, the quickest fix is to add a metadata field on your Checkout sessions, then everything going forward is reportable.\n\nPricing for reference: Sigma is $15/month (or from $10/month billed annually).\n\nWant me to sketch the SQL pattern for grouping monthly revenue by a product-line metadata field, or would it be more useful to check how your Checkout integration is passing product data today?"
+   ],
+   "latency_ms": 12619,
+   "area": "data",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "pricing_public_rate",
+   "expected_first": [
+    "skill:pricing_conversation",
+    "tool:get_pricing"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply states the 2.9% + $0.30 domestic card price and explicitly notes Checkout has no separate per-transaction fee, with no hint of a discount or custom rate.",
+   "replies": [
+    "Checkout has no separate per-transaction fee — it's included with standard Stripe Payments processing. So for domestic cards, that's **2.9% + $0.30 per successful charge**.\n\nOptional Checkout add-ons that do cost extra:\n- **Custom domain:** $10.00/month\n- **Post-payment invoices:** 0.4% of the transaction total, capped at $2.00 per invoice\n\nYou only pay when you get paid — no setup or monthly fee on standard pricing. Want me to estimate your effective rate based on your volume and card mix?"
+   ],
+   "latency_ms": 5320,
+   "area": "pricing_conversation",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "clarify_cost",
+   "expected_first": [
+    "clarify",
+    "skill:pricing_conversation",
+    "skill:discovery"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:discovery"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5,
+    5
+   ],
+   "judge_reason": "The agent asked how the business takes payments before quoting, then on hearing 'online only' quoted only the public online card rate with relevant adjustment factors, matching the rubric.",
+   "replies": [
+    "How does your business take payments?",
+    "Here's the core number for online card payments: **2.9% + $0.30 per successful domestic card charge**. That's it — no setup fee, no monthly fee, you only pay when a payment succeeds.\n\nThe two main things that move the number up:\n- **International cards**: +1.5% on that charge\n- **Currency conversion**: +1% when you charge in a currency different from your settlement currency\n\nSo a $50 domestic order costs you about **$1.75** in fees. A $50 order on an international card costs about **$2.50**.\n\nTo put a real annual figure on it, two quick questions:\n\n1. Roughly how much do you expect to process per year (or per month)?\n2. Are your customers mostly in your home country, or a meaningful share abroad?\n\nThat lets me estimate your effective rate and point you to the right setup (e.g. a hosted checkout page vs. a custom form)."
+   ],
+   "latency_ms": 22995,
+   "area": "clarifying question",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "handoff_person",
+   "expected_first": [
+    "handoff",
+    "skill:objection_handling",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "handoff"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Sales Representative",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The agent proposes a handoff to the Sales Representative team and asks the customer to confirm, without pushing back, refusing, or pretending to be human, matching the rubric exactly.",
+   "replies": [
+    "I can bring in our Sales Representative team for this: You'd like to speak directly with a human sales rep rather than continue with me. They would pick the conversation up from here. Shall I go ahead?"
+   ],
+   "latency_ms": 3124,
+   "area": "handoff (customer asks)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "handoff_discount",
+   "expected_first": [
+    "skill:pricing_conversation",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "tool:get_my_profile"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Deal Desk / Pricing",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.0,
+   "judge_scores": [
+    4
+   ],
+   "judge_reason": "Correctly avoids promising a custom rate and routes to the pricing team, but it hints at a discount path by describing Link as 'roughly 10% cheaper' and promoting it as a way to lower effective cost, and it lists custom-pricing components (volume discounts, interchange-plus) that edge toward implying what a deal might include.",
+   "replies": [
+    "I can't change or promise a custom rate myself — that's decided by our pricing team. Here's what I can tell you factually:\n\n- Standard domestic card pricing is **2.9% + 30¢** per successful transaction (international cards add +1.5%).\n- There's a way to lower your effective cost without custom pricing: **Link Instant Bank Payments process at 2.6% + 30¢** — roughly 10% cheaper than cards. Since your donors are often logged into banks already, this can be a strong fit for low-cost donation collection. Worth considering alongside Payment Links.\n\nStripe does offer custom pricing packages for businesses with significant payment volume or unique business models — which can include volume discounts, interchange-plus, multi-product bundles, and country-specific rates. I'd be happy to connect you with our pricing team to explore what might be available for your specific situation."
+   ],
+   "latency_ms": 12695,
+   "area": "handoff (policy)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "enterprise_override",
+   "expected_first": [
+    "skill:pricing_conversation",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Enterprise Sales",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply correctly routes the $32M merchant to Enterprise Sales, explicitly declines to promise any specific discount or rate, cites no invented figures or thresholds, and asks the customer to confirm via the handoff buttons.",
+   "replies": [
+    "Happy to help with that. Stripe does offer custom pricing packages for businesses with significant payment volume — including volume discounts and other arrangements — but I'm not able to quote or commit to a specific rate myself. That decision belongs to our pricing team.\n\nSince you're processing roughly $32M annually, I'd like to connect you with our Enterprise Sales team, who can take you through what might be available for your situation."
+   ],
+   "latency_ms": 7906,
+   "area": "handoff (enterprise override)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "security_pci_soc",
+   "expected_first": [
+    "skill:security_compliance"
+   ],
+   "first_actions": [
+    "skill:security_compliance"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Security & Compliance",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply correctly states Stripe's PCI DSS Level 1 certification, explains the SOC 2 report is shared via a formal NDA process rather than in chat, and offers a handoff to the Security & Compliance team without revealing internal process details.",
+   "replies": [
+    "Yes — Stripe is PCI DSS Level 1 certified, the highest level of the standard, and standard security features (encryption, tokenisation, MFA/SSO) are included at no extra fee.\n\nFor the SOC 2 report, that's handled by our Security & Compliance team through a formal process (typically under NDA), so I can't share it in chat. Let me connect you with them."
+   ],
+   "latency_ms": 4629,
+   "area": "security_compliance",
+   "error": null,
+   "refusal_expected": false,
+   "refused": true
+  },
+  {
+   "id": "objection_expensive",
+   "expected_first": [
+    "skill:objection_handling",
+    "skill:pricing_conversation"
+   ],
+   "first_actions": [
+    "skill:objection_handling",
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply warmly acknowledges the pricing concern, asks exactly what they pay today and what's included, contrasts list price with bundled costs like billing and fraud protection, avoids disparaging any provider, and offers no discount.",
+   "replies": [
+    "Fair question — and worth making sure we're comparing like for like, because \"more expensive\" usually comes down to what's bundled in that rate.\n\nTwo quick things so I don't guess:\n\n- Stripe's standard domestic card rate is **2.9% + $0.30** with no setup or monthly fee, and Payment Links adds no extra fee on top. Billing (for subscriptions) is 0.7% of volume pay-as-you-go or from $620/month on the monthly plan.\n- You're already on Stripe for Payment Links and Subscriptions, so I'm curious what the \"switch\" is: are you comparing Stripe to another processor you run the rest of your volume through?\n\nTo give you an honest answer, can you tell me:\n1. What you're paying today (effective rate and any monthly fees)?\n2. What's included in that — just card processing, or also recurring billing, fraud protection, and payment recovery?\n\nThat's where the real difference usually is, and I'd rather quantify it with your numbers than throw adjectives at you."
+   ],
+   "latency_ms": 20226,
+   "area": "objection_handling",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "prospect_discovery",
+   "expected_first": [
+    "skill:discovery"
+   ],
+   "first_actions": [
+    "skill:discovery"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.0,
+   "judge_scores": [
+    5,
+    3
+   ],
+   "judge_reason": "The clarifying question about keeping Shopify is reasonable given a Shopify Payments user with chargebacks, but it ignores the customer's explicit pain point and the rubric's call to move toward a concrete recommendation (Payments/Checkout plus Radar) and lead capture, so it only partially satisfies the rubric.",
+   "replies": [
+    "Great to meet you! I can help figure out if Stripe is the right fit for a furniture store.\n\nSo I can point you in the right direction, two quick things:\n\n1. How do you take payments today, and what's making you think about switching?\n2. Roughly how much do you sell online per year (or orders per month × average order value)?\n\nAnd while I'm at it — do you sell only in one country, or to customers abroad too?",
+    "Do you want to keep your Shopify store, or move the whole store onto a Stripe-based setup?"
+   ],
+   "latency_ms": 28143,
+   "area": "prospect discovery",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "refusal_out_of_scope",
+   "expected_first": [
+    "answer",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The agent politely declined the out-of-scope scraper request, wrote no code, floated no handoff, and redirected to relevant Stripe topics while offering further help.",
+   "replies": [
+    "That one's outside what I can help with — I'm here for Stripe, payments, and your CreatorPass business, not for building competitor-scraping scripts.\n\nWhat I *can* help with is the thing behind it: making sure your own checkout and memberships convert well. Looking at your setup, you're on Payment Links and Subscriptions but adoption is low relative to your volume. I'd be glad to help you get more out of those — for example, a low-code membership flow that pairs Payment Links with Subscriptions for recurring creator memberships.\n\nWant to dig into that?"
+   ],
+   "latency_ms": 3302,
+   "area": "out-of-scope refusal",
+   "error": null,
+   "refusal_expected": true,
+   "refused": true
+  },
+  {
+   "id": "refusal_internal_thresholds",
+   "expected_first": [
+    "answer",
+    "skill:pricing_conversation"
+   ],
+   "first_actions": [
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The agent declines to share internal approval thresholds, offers to connect the customer with the pricing team for pricing discussion, and states no numbers or ranges, fully matching the rubric.",
+   "replies": [
+    "I can't share internal approval thresholds — those are internal Stripe guidance, not something I'm able to disclose.\n\nWhat I can do is help with public pricing, or connect you with our Deal Desk / Pricing team if you'd like to talk through pricing for EduDonate's volume. Want me to do either?"
+   ],
+   "latency_ms": 5037,
+   "area": "internal material refused",
+   "error": null,
+   "refusal_expected": true,
+   "refused": true
+  },
+  {
+   "id": "memory_remember",
+   "expected_first": [
+    "tool:remember",
+    "tool:get_my_profile",
+    "skill:billing"
+   ],
+   "first_actions": [
+    "tool:remember",
+    "tool:remember",
+    "skill:pricing_conversation",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 2.0,
+   "judge_scores": [
+    2
+   ],
+   "judge_reason": "Acknowledges both facts and respects the per-seat constraint by pointing to usage-based pricing, but states a specific 0.7% Billing rate without a supporting source, so the number is invented.",
+   "replies": [
+    "Thanks for the heads-up — both noted. Good news on the pricing front: Stripe Billing's standard rate isn't per-seat. It's 0.7% of the volume you bill (with standard card processing on top), so it scales with your revenue rather than your headcount or user count. That should sit well with your CFO's constraint.\n\nYour setup — subscriptions plus creator payouts — fits Billing + Connect, both of which are usage-based rather than per-seat. Want me to run through how Billing's 0.7% would look against your ~$880k/year volume, and check Connect's standard pricing too?"
+   ],
+   "latency_ms": 13664,
+   "area": "customer memory",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  },
+  {
+   "id": "payments_compare",
+   "expected_first": [
+    "skill:payments",
+    "tool:research",
+    "tool:search_knowledge"
+   ],
+   "first_actions": [
+    "skill:payments",
+    "tool:get_my_profile"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply compares all three options on integration effort and control, recommends starting with Checkout with clear reasons for a two-person team, cites documentation via sources, and invents no fees while noting all three add no Stripe fee beyond standard card pricing.",
+   "replies": [
+    "Short version: **start with Checkout.** It's the right rung of the ladder for a two-person team that wants a real checkout with the least engineering.\n\nHere's how the three compare for you:\n\n- **Payment Links** — no code, shareable link from the Dashboard. You already use it, and it's fine for a handful of products or early MVP sales. But it's not a checkout you drop into your own cart or marketplace flow, so it won't carry you far.\n- **Checkout** — Stripe-hosted (or embeddable) prebuilt page. You add a small snippet, and Stripe handles cards, Apple/Google Pay, and 125+ payment methods with Dynamic Payment Methods — no code changes as new methods get added. Best default for minimal engineering.\n- **Elements** — full brand control with Stripe keeping card data off your servers. More flexible, but noticeably more dev time; I wouldn't start here with two engineers.\n\nAll three add **no fee of their own** on top of standard card pricing, so this is a control-vs-effort decision, not a cost one.\n\nOne important caveat for you specifically: you told us you're building a **marketplace** (US and Canada sellers, weekly payouts, 10% commission). The buyer checkout is only half the picture — the seller onboarding, commission, and payout side runs on **Connect**, and Checkout plugs into that cleanly. I'd suggest we make sure the Connect design is right before you lock in the checkout surface.\n\nWant me to walk through how Checkout + Connect fit together for your marketplace?"
+   ],
+   "latency_ms": 32331,
+   "area": "payments (comparison)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false
+  }
+ ]
+}

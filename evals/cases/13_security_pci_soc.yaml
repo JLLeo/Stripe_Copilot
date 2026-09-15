@@ -1,0 +1,10 @@
+id: security_pci_soc
+area: security_compliance
+customer: seed:C003
+messages:
+- Are you PCI compliant, and can we get a copy of your SOC 2 report for our security review?
+first_action:
+- skill:security_compliance
+rubric: States that Stripe is PCI DSS Level 1 certified, explains that SOC reports are shared through
+  a request process (typically under NDA) rather than attached, offers to bring in the security team for
+  a formal review, and reveals no internal process guidance.

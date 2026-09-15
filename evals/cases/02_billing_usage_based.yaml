@@ -1,0 +1,13 @@
+id: billing_usage_based
+area: billing
+customer: seed:C030
+messages:
+- We're moving our API product to usage-based pricing. Can Stripe Billing meter usage and bill customers
+  monthly?
+- Our API gateway can send usage events; we want to bill monthly in arrears, with a small platform fee
+  on top.
+first_action:
+- skill:billing
+rubric: If it asks first, it asks how usage is tracked or billed. By the end it explains that Billing
+  supports usage-based (metered) pricing with monthly invoicing, names the relevant capabilities (meters/usage
+  records, subscriptions, invoices), cites documentation, and quotes only public prices if it quotes any.

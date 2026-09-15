@@ -1,0 +1,11 @@
+id: payments_wallets
+area: payments
+customer: seed:C013
+messages:
+- Does Checkout support Apple Pay and Google Pay, and do we have to do anything to turn them on?
+first_action:
+- skill:payments
+- tool:search_knowledge
+rubric: Confirms that Checkout supports Apple Pay and Google Pay and says how they are enabled (Dashboard
+  payment method settings, domain registration where relevant), citing documentation. Does not invent
+  limits, fees or countries.

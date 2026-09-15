@@ -1,0 +1,12 @@
+id: tax_cross_border
+area: tax
+customer: seed:C013
+messages:
+- Do you handle sales tax and VAT for us if we sell into Canada and the EU?
+- Physical goods — furniture — shipped from our US warehouse to consumers.
+first_action:
+- skill:tax
+rubric: If it asks first, it asks what they sell or where they ship from. By the end it explains that
+  Stripe Tax calculates and collects the right tax at checkout for those regions, that registering and
+  filing remain the merchant's responsibility (with Stripe's help where documented), cites documentation,
+  and gives no tax or legal advice about the customer's specific obligations.

@@ -115,6 +115,7 @@ def get_pricing(ctx: ToolContext, args: dict) -> ToolResult:
     ]
     lines = list(dict.fromkeys(l for e in matched for l in e.lines))
     sources = list(dict.fromkeys(e.source for e in matched))
+    cited = list({(e.title, e.source): {"title": e.title, "url": e.source} for e in matched}.values())
 
     if not lines:
         return ToolResult.from_payload({
@@ -131,7 +132,7 @@ def get_pricing(ctx: ToolContext, args: dict) -> ToolResult:
         "pricing": lines,
         "note": "Public list prices; standard card processing applies on top of add-ons. " + CUSTOM_PRICING_NOTE,
         "sources": sources,
-    })
+    }, sources=cited)  # collected by source_extraction: a quoted price is a cited price
 
 
 # ---------------------------------------------------------------------------

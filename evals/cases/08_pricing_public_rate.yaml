@@ -1,0 +1,13 @@
+id: pricing_public_rate
+area: pricing_conversation
+customer: seed:C013
+messages:
+- What does Checkout cost per transaction?
+first_action:
+- skill:pricing_conversation
+- tool:get_pricing
+within_turn:
+- tool:get_pricing
+rubric: States the public list price for online card payments (2.9% + 30 cents per successful card charge
+  for standard domestic cards), notes that Checkout itself has no extra fee if the documentation says
+  so, and neither offers nor hints at a discount or custom rate.

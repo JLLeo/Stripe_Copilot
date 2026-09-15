@@ -1,0 +1,13 @@
+id: connect_marketplace
+area: connect
+customer: seed:C030
+messages:
+- We're building a marketplace where sellers get paid out weekly and we keep a 10% commission. How would
+  that work on Stripe?
+- Sellers are individuals and small businesses in the US and Canada; we're US-based and expect a few hundred
+  sellers in the first year.
+first_action:
+- skill:connect
+rubric: If it asks first, it asks about where sellers are or who they are. By the end it recommends Connect,
+  explains connected accounts, taking the platform's commission on each transaction and controlling payout
+  timing, cites documentation, and quotes only public Connect pricing if it quotes any.

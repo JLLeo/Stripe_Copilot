@@ -1,0 +1,12 @@
+id: payments_compare
+area: payments (comparison)
+customer: seed:C030
+messages:
+- Compare Checkout, Payment Links and Elements for a two-person engineering team. Which should we start
+  with?
+first_action:
+- skill:payments
+- tool:research
+- tool:search_knowledge
+rubric: Compares the three on integration effort and control, recommends one to start with for a two-person
+  team (Payment Links or Checkout) with reasons, cites documentation, and invents no fees.

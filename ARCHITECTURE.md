@@ -154,7 +154,7 @@ Results are compact JSON — they live in every later request of the session.
 | `Skill(name)` | `skills/` | not cacheable: a load must always land in the conversation |
 | `get_my_profile()` | seed `customers` + `customer_product_usage` | no parameters; reads the session's bound customer, so another customer cannot be named |
 | `list_products(group?)` | seed `stripe_products` | name, group, one-line description |
-| `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing |
+| `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing. `meta.sources` names the documents the prices came from, so `source_extraction` carries them to `done.sources` |
 | `search_knowledge(question, products[], topics[])` | the knowledge index (below) | `products` and `topics` are enums from the graph; results carry passages and sources; `meta.sources` feeds `source_extraction`. Its description says: use this first; hand multi-product, comparative or thin results to `research` |
 | `research(question)` | a Sub-agent (below) over `search_knowledge` | returns `{brief, sources, tool_calls, stopped_by_cap, gave_up}`; the documents the brief cites in `[Title]` form are its sources (a brief that cites nothing keeps everything it read); `meta.subagent` carries its metering |
 | `request_handoff(team, reason, evidence)` | `handoffs` (runtime) | never runs inside a turn: `handoff_confirmation` pauses first, and the customer's answer produces its result (see Handoff) |
@@ -551,20 +551,55 @@ accident and this is where a break shows first.
 
 ## Testing
 
-159 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~24 s. The app under test
+169 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~24 s. The app under test
 always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
-the suite runs with no `.env` and no keys.
+the suite runs with no `.env` and no keys. The 19 evaluation cases carry the `eval`
+marker and are deselected by default (`addopts = -m "not eval"`).
 
 Two seams only ([issue #1](https://github.com/JLLeo/Stripe_Copilot/issues/1), Testing
 Decisions): the **HTTP API** is the test surface and the **Provider** is the
 substitution point. A test scripts the provider, drives the endpoints with FastAPI's
 `TestClient`, then asserts on the response, the recorded requests, and the runtime
 database. The DeepSeek adapter's stream handling is covered against a stub of the
-OpenAI client. Evaluation runs against the real provider *arrive with #12*.
+OpenAI client.
+
+## Evaluation — `evals/`
+
+`pytest -m eval` runs `tests/test_eval.py`: one parametrized test per case in
+`evals/cases/*.yaml`, on a harness built over `Recorder(DeepSeekProvider.from_env())`
+with `HarnessConfig.from_env()`, on the session's temporary runtime database. A `Case`
+names its customer by kind (`prospect`, `small`, `enterprise`) or by seed id, gives one or
+more customer messages, the acceptable first actions (any of `skill:<name>`,
+`tool:<name>`, `clarify`, `handoff`, `answer`), optional `within_turn` and
+`within_session` actions, an expected `handoff_team`, a `refusal` flag and a rubric.
+
+`evals/runner.py` is exercised on the scripted provider by `tests/test_eval_runner.py`
+and does the same work on the real one:
+
+- `Recorder` passes every request through and keeps it with its completion; `actions_of()`
+  turns a completion's tool calls into actions; `first_actions()` reads the main model's
+  first response after a mark (a sub-agent's or the judge's traffic never counts).
+- `run_case()` posts each message to `/sales-agent/chat`, collects first-turn and
+  session actions and the pending handoff's team, stops at the first failed turn, runs
+  `leak_markers()` — the Stop hook's `leaks()` plus `find_placeholders()` — over every
+  reply, then has `judge()` on the sub-agent model score each reply against the rubric,
+  given everything said so far, the sources each reply cited, the handoff card the
+  customer was shown and a one-line description of the customer; the judge also says
+  whether the agent declined, which a `refusal` case requires. Its JSON is found wherever
+  it sits in the answer.
+- `summarise()` and `write_report()` produce the headline numbers (first-action
+  accuracy, leak-free cases, mean judge score, cases passed, errors), a per-case table and
+  every reply with the judge's reason, as `evals/reports/latest.md` and `.json`;
+  `conftest.pytest_terminal_summary` prints the numbers after the run.
+
+A case passes when the first action matched, the within-turn and within-session
+expectations held, the handoff named the expected team, the agent declined where a
+refusal was expected, and nothing leaked. The judge's score is reported (flagged under 3)
+and, with `EVAL_MIN_JUDGE_SCORE`, asserted. The report states how many of the defined
+cases ran; the one in the repository is the latest full run.
 
 ## What arrives next
 
 | Ticket | Adds |
 |---|---|
-| #12 | evaluation suite |
 | #13 | final documentation pass |

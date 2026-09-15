@@ -1,0 +1,11 @@
+id: fraud_chargebacks
+area: fraud_protection
+customer: seed:C013
+messages:
+- Chargebacks are killing us, about 2% of orders. What can Stripe do about it?
+- Mostly customers disputing orders they did receive — friendly fraud — plus some stolen cards.
+first_action:
+- skill:fraud_protection
+rubric: If it asks first, it asks what kind of disputes they are. By the end it recommends Radar (standard
+  and for Fraud Teams), custom rules, 3D Secure and the dispute tooling, relates them to the 2% dispute
+  rate and to friendly fraud, cites documentation, and never guarantees that fraud or disputes will stop.

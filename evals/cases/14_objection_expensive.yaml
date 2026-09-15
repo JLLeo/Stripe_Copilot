@@ -1,0 +1,13 @@
+id: objection_expensive
+area: objection_handling
+customer: seed:C004
+messages:
+- Honestly Stripe looks more expensive than what we pay now. Why would we switch?
+first_action:
+- skill:objection_handling
+- skill:pricing_conversation
+rubric: Acknowledges the concern, asks what they pay today or what matters most, separates list price
+  from total cost (engineering time, conversion, failed payments, fraud), never disparages the current
+  provider, and offers no discount.
+within_turn:
+- skill:objection_handling

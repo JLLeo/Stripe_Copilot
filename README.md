@@ -17,8 +17,10 @@ prompt from the first turn, corrected when they say it changed, and completed by
 pass when they end the conversation. A pasted document becomes an attachment the agent
 reads in pieces, and a very long conversation stays coherent: spent tool results are
 cleared and, rarely, working memory is compacted into one rolling summary. Every step
-streamed, every turn metered. The evaluation suite and the final documentation pass land
-with [issues #12–#13](https://github.com/JLLeo/Stripe_Copilot/issues/1).
+streamed, every turn metered — and measured: `pytest -m eval` runs nineteen
+customer-viewpoint sessions against the real model and reports first-action accuracy, a
+judge's score and a zero-leak check. The final documentation pass lands with
+[issue #13](https://github.com/JLLeo/Stripe_Copilot/issues/1).
 
 ---
 
@@ -102,7 +104,11 @@ stripe-sales-copilot/
 ├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 159 tests, no network, ~24s (builds a real Milvus Lite fixture)
+├── tests/                    # 169 tests, no network, ~24s (builds a real Milvus Lite fixture); + 19 eval cases on demand
+├── evals/
+│   ├── cases/*.yaml          # 19 customer-viewpoint sessions: expected first action, expectations, rubric
+│   ├── runner.py             # Recorder over the provider, first-action reading, deepseek-flash judge, zero-leak, report
+│   └── reports/latest.md     # the last `pytest -m eval` run (and latest.json)
 ├── docs/adr/                 # Architecture decision records
 ├── CONTEXT.md                # Domain glossary
 └── ARCHITECTURE.md
@@ -165,7 +171,8 @@ captures a lead. A session is bound to its customer on first contact and refuses
 ## Testing
 
 ```bash
-pytest            # 159 tests in ~24s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 169 tests in ~24s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest -m eval    # the evaluation suite: 19 sessions against DeepSeek, ~5 min, needs .env
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
@@ -184,11 +191,59 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_memory.py` | Customer Memory: `remember` → row with source turn and confidence; the next session's first request carries the fact with its `[m<id>]`; a correction supersedes, a retraction drops it from the block; the same fact is never written twice (by `remember` or by reflection); kinds and ids validated; denied for a prospect; the injected set is bounded to 12, most recent first; `/sales-agent/end` runs reflection on `deepseek-flash` in its own context, writes merged rows, is metered as a `session_end` pass, refuses further turns and a second end, skips prospects, and ends the session even when the sub-agent fails. The prefix test in `test_harness_chat.py` now includes a turn that remembers a fact |
 | `tests/test_prospect.py` | Prospect sessions: the block knows nothing yet and points at discovery, `get_my_profile` reports no profile, the customers list leads with **New prospect**; the `discovery` skill teaches behaviour and quotes no internal text (every skill body passes `leaks()`); `capture_lead` writes one row per session, later calls refine it and return the whole lead, an empty call gets feedback, a signed-in customer is denied (`prospect_only`), a prospect who states $50M is routed to Enterprise Sales; `/api/leads` newest first and `leads_captured` in metrics |
 | `tests/test_clarify_and_stop.py` | `ask_customer` ends the turn with options and the choice is the next message; 2–5 distinct options; a question that would leak or leave blanks is denied with feedback; Stop hook rewrites placeholders and internal leaks before anything streams, gives up after two rewrites with a safe reply, and checks the text beside a handoff proposal; citations, links and sign-offs handled; `leaks()` finds curated and document-derived markers and nothing a public document says |
-| `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape |
+| `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape, the request timeout |
+| `tests/test_eval_runner.py` | The evaluation runner on the scripted provider: the case set covers every skill, clarifying questions, both handoff triggers and the enterprise override, prospect discovery and refusal; actions are read off recorded completions and only the main model's count; a case checks first action, within-turn and within-session expectations, the handoff team, a refusal where one is expected, and leaks, and judges every reply; the judge's JSON is found among prose; the summary and the report, incomplete runs and table cells included |
+| `tests/test_eval.py` | `pytest -m eval` — see Evaluation |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
 | `tests/test_api_customers.py` | Customer list served through the shared connection |
 
 Running the suite leaves `git status` clean: the suite uses its own runtime database.
+
+## Evaluation
+
+```bash
+pytest -m eval                       # all 19 cases; writes evals/reports/latest.md and latest.json
+pytest -m eval -k handoff            # a subset
+EVAL_MIN_JUDGE_SCORE=3 pytest -m eval   # also fail a case the judge scores under 3
+```
+
+The unit suite proves the plumbing; the evaluation suite measures behaviour, on the real
+model, from the customer's side. Each case in `evals/cases/` is a short session with a
+customer (a seed customer by id, or a prospect), the **first action** the agent is expected
+to take — a skill loaded, a tool called, a clarifying question, a handoff proposed, or a
+plain answer such as a refusal — optional actions that must happen somewhere in the first
+turn or the session, the team a proposed handoff must name, whether a refusal is expected,
+and a rubric for the judge. The nineteen cases cover every skill, a clarifying
+question, a handoff the customer asks for and one a policy requires, the enterprise
+override, prospect discovery with lead capture, customer memory, and two refusals
+(out of scope; internal material).
+
+The runner wraps the provider in a `Recorder`, so the agent's actions are read off the
+actual model traffic (parallel calls in the first response all count as first; a
+sub-agent's calls never do), drives the case through `/sales-agent/chat` exactly as the
+browser would, runs the zero-leak check on every reply, and asks a judge on
+`deepseek-flash` to score each reply 1–5 against the rubric, seeing the sources the reply
+cited and the handoff card the customer was shown, and — where a refusal is expected — to
+say whether the agent declined. A case **passes** when the first action matched, the other
+expectations held, the handoff named the right team, the agent declined where it should,
+and nothing leaked; the judge's score is reported (flagged in the table under 3) and
+asserted only when `EVAL_MIN_JUDGE_SCORE` is set — a model grading a model is a signal, not
+a gate.
+
+The report (`evals/reports/latest.md`, with a JSON twin) opens with the headline numbers
+— first-action accuracy, leak-free cases, mean judge score, cases passed — then one row
+per case (expected vs actual first actions, within-turn and handoff checks, judge score,
+leaks, latency) and every reply with the judge's reason, so a failed case can be read,
+not just counted; a run of a subset says how many of the defined cases it covered. The same
+numbers are printed at the end of the pytest run. The report in the repository is the
+latest full run; re-running overwrites it, and a changed report belongs in the same commit
+as the behaviour change that caused it.
+
+The run in [`evals/reports/latest.md`](evals/reports/latest.md): first-action accuracy
+19/19, leak-free 19/19, both refusals confirmed by the judge, mean judge score 4.5 / 5, in
+under seven minutes. The one flagged case is instructive: the judge marked Billing's public
+0.7% rate as "invented" because the reply did not cite it inline — a judge's reading, not a
+leak, and exactly the kind of thing the report exists to show.
 
 ## Skills and tools
 
@@ -203,7 +258,7 @@ them. Adding a behaviour is adding a file.
 | `Skill(name)` | the skill body; one of the seven product skills or `discovery`, `pricing_conversation`, `security_compliance`, `objection_handling` |
 | `get_my_profile()` | the bound customer's profile and products in use — no arguments, so no way to ask about anyone else. In a prospect session: no profile, and a note to ask |
 | `list_products(group?)` | the catalogue from the seed database |
-| `get_pricing(product)` | public list prices for the product, read from the `Price` sections of knowledge-base documents marked `Access Level: public` (the seed database holds no prices); when nothing matches it says so instead of guessing |
+| `get_pricing(product)` | public list prices for the product, read from the `Price` sections of knowledge-base documents marked `Access Level: public` (the seed database holds no prices); when nothing matches it says so instead of guessing. The documents a price came from are carried as sources, so a quoted price is a cited price |
 | `search_knowledge(question, products[], topics[])` | passages from Stripe's public documentation with their sources. `products` and `topics` are enums from the knowledge graph — the model does the entity linking, the graph widens the search one hop, and dense + BM25 legs run with the same filter and are fused |
 | `research(question)` | a **sub-agent**: a bounded loop on `deepseek-flash` with `search_knowledge` as its only tool, up to 3 rounds, in its own context. Only its cited brief comes back, and the customer watches each search as it happens. For questions that span products, need a comparison, or came back thin from one search |
 | `request_handoff(team, reason, evidence)` | propose handing the conversation to one of seven human **Teams**. Guardrails check the team, that the evidence is the customer's own words or a profile fact, and that a customer above $10M a year goes to Enterprise Sales; then the turn **pauses** and the customer confirms or declines in the UI. Only a confirmation records a handoff |

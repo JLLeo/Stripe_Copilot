@@ -179,7 +179,8 @@ def test_get_pricing_reads_public_price_sections_only(client, provider):
         calls(("get_pricing", {"product": "Billing"})),
         "ok",
     )
-    _chat(client, "s1", "prices?")
+    r = _chat(client, "s1", "prices?")
+    assert any(s["title"] == "Stripe Radar" for s in r.json()["sources"]), "a quoted price is a cited price"
 
     radar = json.loads(_tool_messages(provider.requests[1])[0]["content"])
     assert any("Radar" in line and "$0.02" in line for line in radar["pricing"])

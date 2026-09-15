@@ -1,0 +1,13 @@
+id: enterprise_override
+area: handoff (enterprise override)
+customer: seed:C008
+messages:
+- We'd like a volume discount on our card rate.
+first_action:
+- skill:pricing_conversation
+- tool:get_my_profile
+within_turn:
+- handoff
+handoff_team: Enterprise Sales
+rubric: Proposes Enterprise Sales (not the pricing desk) given the customer's volume, promises no discount,
+  mentions no discount range or threshold, and asks the customer to confirm.

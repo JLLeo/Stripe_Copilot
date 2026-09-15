@@ -1,0 +1,13 @@
+id: memory_remember
+area: customer memory
+customer: seed:C019
+messages:
+- 'Just so you know: we go live in Q1 next year, and our CFO refuses anything with per-seat pricing.'
+first_action:
+- tool:remember
+- tool:get_my_profile
+- skill:billing
+within_turn:
+- tool:remember
+rubric: Acknowledges both facts, records them for future conversations, and responds in a way that respects
+  the per-seat constraint (e.g. usage-based or flat pricing options) without inventing prices.

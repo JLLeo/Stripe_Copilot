@@ -20,6 +20,22 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """After `pytest -m eval`: the report's headline numbers and where the full report went."""
+    summary = getattr(config, "_eval_summary", None)
+    if not summary:
+        return
+    numbers, path = summary
+    mean = numbers["mean_judge_score"]
+    judge = f"{mean:.1f}/5" if mean is not None else "n/a"
+    terminalreporter.section("evaluation")
+    terminalreporter.write_line(
+        f"first-action accuracy {numbers['first_action_matched']}/{numbers['cases']} ({numbers['first_action_accuracy']:.0%}) "
+        f"- leak-free {numbers['leak_free']}/{numbers['cases']} - mean judge score {judge}"
+    )
+    terminalreporter.write_line(f"cases passed {numbers['passed']}/{numbers['cases']} - report: {path}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolated_runtime_db(tmp_path_factory):
     from app import database

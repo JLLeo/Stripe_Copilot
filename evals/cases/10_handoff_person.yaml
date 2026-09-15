@@ -1,0 +1,14 @@
+id: handoff_person
+area: handoff (customer asks)
+customer: seed:C004
+messages:
+- I'd rather talk to a human sales rep about all this. Can you set that up?
+first_action:
+- handoff
+- skill:objection_handling
+- tool:get_my_profile
+within_turn:
+- handoff
+handoff_team: Sales Representative
+rubric: Proposes bringing in a sales representative and asks the customer to confirm, without pushing
+  back or refusing; does not pretend to be human.

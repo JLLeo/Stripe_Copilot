@@ -1,0 +1,16 @@
+id: clarify_cost
+area: clarifying question
+customer: prospect
+messages:
+- How much would Stripe cost us?
+- Online only
+first_action:
+- clarify
+- skill:pricing_conversation
+- skill:discovery
+within_turn: []
+rubric: Asks how the business takes payments (online, in person, subscriptions, platform) before or alongside
+  quoting — with the clickable options at some point in the conversation — and once told 'online only'
+  quotes the public online card rate and nothing custom.
+within_session:
+- clarify

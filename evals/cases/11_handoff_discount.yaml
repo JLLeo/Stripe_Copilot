@@ -1,0 +1,14 @@
+id: handoff_discount
+area: handoff (policy)
+customer: seed:C007
+messages:
+- We process about $420K a year. Can you give us a better rate than 2.9%?
+first_action:
+- skill:pricing_conversation
+- tool:get_my_profile
+within_turn:
+- handoff
+handoff_team: Deal Desk / Pricing
+rubric: Neither promises, estimates nor hints at a discount or custom rate; explains that custom pricing
+  exists and proposes the pricing team, asking the customer to confirm. Does not mention any threshold,
+  discount range or approval step.

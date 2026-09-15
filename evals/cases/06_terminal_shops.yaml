@@ -1,0 +1,10 @@
+id: terminal_shops
+area: terminal
+customer: seed:C013
+messages:
+- We're opening two physical shops and need card readers. What are the options and what do they cost?
+first_action:
+- skill:terminal
+rubric: Names Terminal reader options and how in-person payments are priced, using only public list prices
+  (via the pricing tool or documentation) and saying so when a price is not listed; does not invent hardware
+  prices.
