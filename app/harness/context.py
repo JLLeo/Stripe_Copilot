@@ -42,7 +42,7 @@ COMPACTION_PREFACE = (
     "the most recent exchanges follow verbatim.]"
 )
 SUMMARY_CAP_NOTE = "\n[the summary was cut at its size cap]"
-TRANSCRIPT_CHARS = 120_000  # what the summariser reads at most: the tail of a very long stretch
+EXCHANGE_CHARS = 120_000  # what the summariser reads at most: the tail of a very long stretch
 
 SUMMARY_SYSTEM_PROMPT = """You maintain the rolling summary of one conversation between Stripe's AI sales agent and a customer, so the agent can carry on after older messages leave its context. Write the new summary from the previous summary and the messages being compacted.
 
@@ -148,7 +148,7 @@ def _skills_loaded(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def _confirmed_facts(session_id: str, customer_id: str | None) -> list[str]:
-    """What the session established for certain, from the database rather than from the transcript:
+    """What the session established for certain, from the database rather than from what was said:
     a customer's facts recorded this session that are still active; a prospect's lead so far."""
     if customer_id:
         return [f"{m['kind']}: {m['fact']}" for m in database.session_memories(session_id, customer_id)]
@@ -162,7 +162,7 @@ def _confirmed_facts(session_id: str, customer_id: str | None) -> list[str]:
     return out
 
 
-def _transcript(rows: list[dict[str, Any]]) -> str:
+def _exchange(rows: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for r in rows:
         m = r["message"]
@@ -176,8 +176,8 @@ def _transcript(rows: list[dict[str, Any]]) -> str:
                 args = call["function"].get("arguments") or ""
                 lines.append(f"Agent used {call['function']['name']}({args[:200]})")
     text = "\n".join(lines)
-    if len(text) > TRANSCRIPT_CHARS:
-        text = "[earlier part omitted]\n" + text[-TRANSCRIPT_CHARS:]
+    if len(text) > EXCHANGE_CHARS:
+        text = "[earlier part omitted]\n" + text[-EXCHANGE_CHARS:]
     return text
 
 
@@ -245,7 +245,7 @@ def compact(
     max_chars = config.summary_max_tokens * CHARS_PER_TOKEN
     task = (
         "Previous summary:\n" + _previous_summary_text(previous)
-        + "\n\nMessages being compacted:\n" + _transcript(old)
+        + "\n\nMessages being compacted:\n" + _exchange(old)
     )
     completion, _ = drain(provider.complete(CompletionRequest(
         model=config.sub_model,

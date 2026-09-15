@@ -22,8 +22,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SOURCE_XLSX = ROOT / "data.xlsx"
 SEED_DB_PATH = ROOT / "data" / "seed.db"
 
-# Sheet name -> DDL. The sheet must carry every column the table declares;
-# extra sheet columns are ignored.
+# Sheet name -> DDL. The sheet must carry every column the table declares (under the
+# name in COLUMN_SOURCES where the spreadsheet uses an older one); extra sheet columns
+# are ignored.
 TABLES: dict[str, str] = {
     "customers": """
         CREATE TABLE customers (
@@ -77,12 +78,20 @@ TABLES: dict[str, str] = {
             policy_area           TEXT NOT NULL,
             policy_title          TEXT,
             policy_summary        TEXT,
-            escalation_team       TEXT,
+            handoff_team          TEXT,
             effective_start_date  TEXT,
             effective_end_date    TEXT,
             is_active             BOOLEAN
         )
     """,
+}
+
+
+# table column -> the spreadsheet's column, where the two differ. The spreadsheet predates
+# the agent and names the Team a policy hands off to with an older word; the seed column
+# uses the glossary's (CONTEXT.md: Handoff, Team).
+COLUMN_SOURCES: dict[str, dict[str, str]] = {
+    "sales_policy_updates": {"handoff_team": "escalation_team"},
 }
 
 
@@ -108,10 +117,12 @@ def _normalize(declared_type: str, value: Any) -> Any:
 def _rows(sheet, schema: dict[str, str]) -> list[tuple]:
     iterator = sheet.iter_rows(values_only=True)
     header = [str(h).strip() if h is not None else "" for h in next(iterator)]
-    missing = [c for c in schema if c not in header]
+    sources = COLUMN_SOURCES.get(sheet.title, {})
+    wanted = {name: sources.get(name, name) for name in schema}
+    missing = [column for column in wanted.values() if column not in header]
     if missing:
         raise ValueError(f"sheet '{sheet.title}' is missing columns: {missing}")
-    index = {name: header.index(name) for name in schema}
+    index = {name: header.index(column) for name, column in wanted.items()}
     rows = []
     for raw in iterator:
         if raw is None or all(v is None for v in raw):

@@ -8,7 +8,7 @@ model was reduced to filling in text.
 
 We are rebuilding the harness on the opposite principle, the one Claude Code uses:
 **the model chooses what to do (which skill to load, which tools to call, whether to
-escalate); deterministic code only validates or constrains those choices** as
+propose a handoff); deterministic code only validates or constrains those choices** as
 guardrails — permission gates, evidence checks, output validators, context budgets.
 No rule may select an action on the model's behalf.
 

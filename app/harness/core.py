@@ -249,7 +249,7 @@ class Harness:
     def run_turn(self, session_id: str, customer_id: str | None, message: str) -> Iterator[TurnEvent]:
         """One customer message, to the model's final reply or to a pause for confirmation."""
         session = self._bind_session(session_id, customer_id)
-        # Settle first, so relief works on a valid transcript; then relieve pressure from the last
+        # Settle first, so relief works on a valid sequence; then relieve pressure from the last
         # response before this turn's request is built (ADR 0006); then render what the model sees.
         self._settled_working_memory(session_id)
         relief = context.relieve(session, self.provider, self.config)
@@ -270,7 +270,7 @@ class Harness:
         """The customer answered a pending handoff: settle the paused tool call, then let the model go on.
 
         The tool result is written to working memory before the model is called, so a
-        provider failure here can never leave the transcript with a dangling tool call.
+        provider failure here can never leave working memory with a dangling tool call.
         """
         resolved = handoff.resolve(session_id, accept)
         if resolved is None:
@@ -309,7 +309,7 @@ class Harness:
         return summary
 
     def _settled_working_memory(self, session_id: str) -> list[dict[str, Any]]:
-        """Working memory with every proposal answered and every tool call resulted — a valid transcript.
+        """Working memory with every proposal answered and every tool call resulted — a valid sequence for the model.
 
         A handoff still pending when the customer says something else counts as declined. A
         pending row whose tool call never reached working memory (the customer disconnected
@@ -320,11 +320,11 @@ class Harness:
         settled: list[dict[str, Any]] = []
         pending = database.pending_handoff(session_id)
         if pending is not None:
-            in_transcript = any(
+            in_memory = any(
                 c["id"] == pending["tool_call_id"]
                 for m in working_memory if m["role"] == "assistant" for c in m.get("tool_calls") or []
             )
-            if in_transcript:
+            if in_memory:
                 resolved = handoff.resolve(session_id, accept=False)
                 if resolved is not None:
                     call_id, result = resolved

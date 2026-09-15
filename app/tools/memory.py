@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 REMEMBER_CONFIDENCE = 0.9  # the customer said it, in this conversation
 MAX_FACT_CHARS = 300
-REFLECTION_TRANSCRIPT_CHARS = 60_000  # the tail of a very long session is what reflection reads
+REFLECTION_EXCHANGE_CHARS = 60_000  # the tail of a very long session is what reflection reads
 
 
 # ---------------------------------------------------------------------------
@@ -261,10 +261,10 @@ def reflection_task(customer_name: str, working_memory: list[dict[str, Any]], me
             turns.append("Summary of the earlier conversation:\n" + content[len(COMPACTION_PREFACE):].strip())
             continue
         turns.append(("Customer: " if m["role"] == "user" else "Agent: ") + content)
-    transcript = "\n".join(turns)
-    if len(transcript) > REFLECTION_TRANSCRIPT_CHARS:
-        transcript = "[earlier part of the conversation omitted]\n" + transcript[-REFLECTION_TRANSCRIPT_CHARS:]
-    return "\n".join(lines) + "\n" + transcript
+    exchange = "\n".join(turns)
+    if len(exchange) > REFLECTION_EXCHANGE_CHARS:
+        exchange = "[earlier part of the conversation omitted]\n" + exchange[-REFLECTION_EXCHANGE_CHARS:]
+    return "\n".join(lines) + "\n" + exchange
 
 
 def make_reflection(provider: Provider, *, model: str, thinking: str) -> Callable[[SessionEndContext], dict[str, Any]]:

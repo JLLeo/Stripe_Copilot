@@ -6,8 +6,8 @@ task, a system prompt of its own, a restricted tool set, its own (usually
 cheaper) model, and a round cap. Nothing from the main conversation is passed
 in and nothing but the brief comes out, so the main context stays small no
 matter how much the sub-agent reads (ADR 0006). The same runner serves
-research now and reflection later; the wording a sub-agent uses when its
-budget runs out belongs to its spec, not to the runner.
+research (a tool) and reflection (the SessionEnd pass); the wording a
+sub-agent uses when its budget runs out belongs to its spec, not to the runner.
 """
 
 from __future__ import annotations

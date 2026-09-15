@@ -43,7 +43,7 @@ class EndTurn:
     """A tool result that also ends the turn: the customer must answer before the model goes on.
 
     Placed on `ToolResult.meta["end_turn"]`. The tool's result is written like any other,
-    so the transcript stays valid; the harness stops dispatching, emits `event` with
+    so working memory stays a valid sequence; the harness stops dispatching, emits `event` with
     `data`, and makes `reply` what the customer sees.
     """
 

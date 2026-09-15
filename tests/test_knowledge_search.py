@@ -93,7 +93,7 @@ def test_vocabulary_comes_from_the_knowledge_graph():
     assert {"checkout", "radar", "billing", "connect", "tax"} <= set(vocab.products)
     assert {"pci_dss", "soc2", "eu", "apple_pay", "enterprise"} <= set(vocab.topics)
     assert "escalation_request" not in vocab.topics and "marketplace" not in vocab.topics, \
-        "the old routing scenarios are not part of the vocabulary"
+        "only products and topics from the graph are in the vocabulary"
 
 
 def test_linked_products_expand_one_hop_and_topics_resolve_to_products():

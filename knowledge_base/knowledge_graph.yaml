@@ -1,7 +1,9 @@
-# Stripe Sales Copilot — Knowledge Graph
+# Stripe AI Sales Agent — Knowledge Graph
 # ========================================
-# Entities and relationships extracted from knowledge_base/*.md
-# Used for query expansion and metadata enrichment in RAG pipeline.
+# Entities and relationships extracted from knowledge_base/*.md.
+# Products, payment methods, compliance standards, geographies and customer
+# types are the vocabulary the model links a question to (Entity Linking);
+# the edges widen a search one hop (Graph Expansion). See app/retrieval/graph.py.
 
 entities:
   # ---- Product Lines ----
@@ -236,155 +238,6 @@ entities:
       category: bank_debit
       regions: [us]
 
-  # ---- Sales Scenarios ----
-  sales_scenario:
-    - id: ecommerce
-      name: "E-commerce Checkout"
-      question_patterns:
-        - "online store"
-        - "sell online"
-        - "shopping cart"
-        - "ecommerce"
-        - "online shop"
-
-    - id: marketplace
-      name: "Marketplace / Platform"
-      question_patterns:
-        - "marketplace"
-        - "platform"
-        - "seller"
-        - "payout"
-        - "multi-party"
-        - "split payment"
-
-    - id: saas_billing
-      name: "SaaS Subscription Billing"
-      question_patterns:
-        - "saas"
-        - "subscription"
-        - "recurring"
-        - "monthly billing"
-        - "annual plan"
-        - "software"
-
-    - id: b2b_invoicing
-      name: "B2B Invoicing"
-      question_patterns:
-        - "invoice"
-        - "bill"
-        - "b2b"
-        - "net 30"
-        - "payment terms"
-        - "quote"
-
-    - id: in_person
-      name: "In-Person / POS"
-      question_patterns:
-        - "in person"
-        - "pos"
-        - "retail"
-        - "store"
-        - "card reader"
-        - "tap to pay"
-        - "point of sale"
-
-    - id: fraud_prevention
-      name: "Fraud Prevention"
-      question_patterns:
-        - "fraud"
-        - "chargeback"
-        - "risk"
-        - "dispute"
-        - "block"
-
-    - id: global_expansion
-      name: "Global Expansion / Multi-Currency"
-      question_patterns:
-        - "international"
-        - "global"
-        - "multi currency"
-        - "europe"
-        - "asia"
-        - "local payment"
-
-    - id: security_compliance
-      name: "Security & Compliance Review"
-      question_patterns:
-        - "soc 2"
-        - "pci"
-        - "security"
-        - "compliance"
-        - "encryption"
-        - "gdpr"
-        - "penetration test"
-        - "pen test"
-
-    - id: pricing_negotiation
-      name: "Pricing / Cost Discussion"
-      question_patterns:
-        - "pricing"
-        - "discount"
-        - "fees"
-        - "cost"
-        - "rate"
-        - "custom price"
-
-    - id: financial_reporting
-      name: "Financial Reporting & Analytics"
-      question_patterns:
-        - "report"
-        - "analytics"
-        - "data"
-        - "revenue report"
-        - "sql"
-        - "warehouse"
-        - "dashboard"
-
-    - id: no_code
-      name: "No-Code / Low-Code Payments"
-      question_patterns:
-        - "no code"
-        - "without coding"
-        - "no developer"
-        - "easy setup"
-        - "quick start"
-        - "link"
-
-    - id: tax_compliance
-      name: "Tax / VAT Compliance"
-      question_patterns:
-        - "tax"
-        - "vat"
-        - "gst"
-        - "sales tax"
-        - "tax calculation"
-        - "tax filing"
-
-    - id: escalation_request
-      name: "Escalation Request"
-      question_patterns:
-        - "talk to human"
-        - "talk to a human"
-        - "talk to someone"
-        - "speak to human"
-        - "speak to agent"
-        - "speak to someone"
-        - "need a human"
-        - "need a real person"
-        - "real person"
-        - "live agent"
-        - "live person"
-        - "not a bot"
-        - "not an ai"
-        - "connect me to"
-        - "transfer me to"
-        - "escalate this"
-        - "escalate my"
-        - "complaint"
-        - "manager"
-        - "supervisor"
-        - "representative"
-
   # ---- Compliance Standards ----
   compliance:
     - id: pci_dss
@@ -434,24 +287,6 @@ entities:
     - id: strategic
       name: "Strategic ($100M+ annual volume)"
 
-  # ---- Escalation Teams ----
-  escalation_team:
-    - id: deal_desk
-      name: "Deal Desk / Pricing Team"
-      triggers: [custom_pricing, discount_request]
-    - id: security_team
-      name: "Security & Compliance"
-      triggers: [soc_request, security_review, penetration_test]
-    - id: connect_specialist
-      name: "Connect Specialist"
-      triggers: [complex_connect, multi_party_flow]
-    - id: sales_ops
-      name: "Sales Ops / Human Agent"
-      triggers: [talk_to_human, escalation_request]
-    - id: enterprise_sales
-      name: "Enterprise Sales"
-      triggers: [strategic_deal, enterprise_contract]
-
 
 # ---- Relationships (Triples) ----
 # Format: subject, predicate, object
@@ -475,28 +310,6 @@ relationships:
   - [revenue_recognition, belongs_to, revenue]
   - [sigma, belongs_to, revenue]
   - [data_pipeline, belongs_to, revenue]
-
-  # === Product → Sales Scenario ===
-  - [checkout, used_for, ecommerce]
-  - [checkout, used_for, saas_billing]
-  - [checkout, used_for, no_code]
-  - [payment_links, used_for, ecommerce]
-  - [payment_links, used_for, no_code]
-  - [elements, used_for, ecommerce]
-  - [elements, used_for, saas_billing]
-  - [terminal, used_for, in_person]
-  - [radar, used_for, fraud_prevention]
-  - [connect, used_for, marketplace]
-  - [billing, used_for, saas_billing]
-  - [subscriptions, used_for, saas_billing]
-  - [invoicing, used_for, b2b_invoicing]
-  - [invoicing, used_for, saas_billing]
-  - [tax, used_for, tax_compliance]
-  - [tax, used_for, global_expansion]
-  - [revenue_recognition, used_for, financial_reporting]
-  - [sigma, used_for, financial_reporting]
-  - [data_pipeline, used_for, financial_reporting]
-  - [payment_methods, used_for, global_expansion]
 
   # === Product → Payment Method ===
   - [checkout, supports_method, cards]
@@ -628,9 +441,3 @@ relationships:
   - [tax, suitable_for, growth]
   - [tax, suitable_for, mid_market]
   - [tax, suitable_for, enterprise]
-
-  # === Scenario → Escalation ===
-  - [pricing_negotiation, requires_escalation, deal_desk]
-  - [security_compliance, requires_escalation, security_team]
-  - [marketplace, requires_escalation, connect_specialist]
-  - [escalation_request, requires_escalation, sales_ops]

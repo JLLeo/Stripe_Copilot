@@ -51,7 +51,7 @@ def render_policies(policies: list[dict[str, Any]], team_for: Callable[[str], st
         summary = (p.get("policy_summary") or "").strip()
         line = f"- [{area}] {title}: {summary}" if summary else f"- [{area}] {title}"
         if team_for is not None:
-            line += f" → hand off to {team_for(p.get('escalation_team') or '')}"
+            line += f" → hand off to {team_for(p.get('handoff_team') or '')}"
         lines.append(line)
     return "\n".join(lines)
 

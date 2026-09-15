@@ -4,23 +4,26 @@ A customer-facing AI sales agent for Stripe, built on a hand-written harness in 
 style of Claude Code: the model decides what to do on every turn; deterministic code
 only builds the request, moves bytes, and guards the edges.
 
-This branch is a ground-up rebuild in progress. Today a customer signs in, asks a
-question, and watches the agent load the relevant skill, search Stripe's public
-documentation — or hand a hard question to a research sub-agent — look up the profile,
-catalogue or pricing, and answer with sources; when a request is ambiguous it asks a
-clarifying question with options; when the matter needs a person, it proposes a handoff and
-waits for the customer's yes; and no reply reaches the customer with a placeholder or a line
-from an internal document. Someone with no Stripe account is a **prospect**: the agent runs
-discovery, recommends a starting set of products and captures what it learned as a **lead**.
-An existing customer who comes back is remembered: what they said last time is in the
-prompt from the first turn, corrected when they say it changed, and completed by a reflection
-pass when they end the conversation. A pasted document becomes an attachment the agent
-reads in pieces, and a very long conversation stays coherent: spent tool results are
-cleared and, rarely, working memory is compacted into one rolling summary. Every step
-streamed, every turn metered — and measured: `pytest -m eval` runs nineteen
+A customer signs in — or starts as a prospect — asks a question, and watches the agent
+load the relevant skill, search Stripe's public documentation (or hand a hard question to
+a research sub-agent), look up the profile, catalogue or pricing, and answer with sources.
+When a request is ambiguous it asks a clarifying question with clickable options; when the
+matter needs a person it proposes a handoff to one of seven teams and waits for the
+customer's yes; no reply reaches the customer with a placeholder or a line from an
+internal document. A **prospect** gets discovery, a recommended starting set of products
+and a captured **lead**. A returning customer is remembered: what they said last time is
+in the prompt from the first turn, corrected when they say it changed, completed by a
+reflection pass when they end the conversation. A long pasted message becomes an attachment
+read in pieces; a very long conversation stays coherent, with spent tool results cleared
+and — rarely — working memory compacted into one rolling summary. Every step is streamed,
+every turn metered, and the whole thing is measured: `pytest -m eval` runs nineteen
 customer-viewpoint sessions against the real model and reports first-action accuracy, a
-judge's score and a zero-leak check. The final documentation pass lands with
-[issue #13](https://github.com/JLLeo/Stripe_Copilot/issues/1).
+judge's score and a zero-leak check.
+
+The design was settled first — a glossary and six decision records — then built ticket by
+ticket on the same branch ([issue #1](https://github.com/JLLeo/Stripe_Copilot/issues/1)
+is the spec; #2–#13 the tickets), each with tests at the HTTP seam and a live check
+against the model.
 
 ---
 
@@ -50,10 +53,11 @@ customer message  ─►  /sales-agent/stream
    SSE: context_relieved? · thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer)* · text_delta* · done | error
 ```
 
-Every request is built in the same order — static system prompt, tool definitions
-(none yet), customer block, working memory — and nothing before the newest message
-is ever rewritten. DeepSeek's context cache is a prefix match, so on a real two-turn
-session 1,024 of the second turn's 1,169 prompt tokens were served from cache.
+Every request is built in the same order — static system prompt, the eleven tool
+definitions, customer block, working memory — and nothing before the newest message is
+rewritten except by clearing and compaction, rarely and only under pressure. DeepSeek's
+context cache is a prefix match, so on a real two-turn session 1,024 of the second turn's
+1,169 prompt tokens were served from cache, and 89–92% of a turn with skills and tools.
 
 The design decisions behind this are recorded in [`docs/adr/`](docs/adr/) and the
 vocabulary in [`CONTEXT.md`](CONTEXT.md).
@@ -63,8 +67,8 @@ vocabulary in [`CONTEXT.md`](CONTEXT.md).
 ```
 stripe-sales-copilot/
 ├── app/
-│   ├── main.py               # FastAPI transport: chat, SSE stream, customers, metrics
-│   ├── schemas.py            # ChatRequest / ChatResponse
+│   ├── main.py               # FastAPI transport: chat, SSE stream, confirm-handoff, end, customers, leads, metrics
+│   ├── schemas.py            # Request / response shapes for the endpoints
 │   ├── database.py           # One connection over seed.db (read-only) + runtime.db
 │   ├── metrics.py            # TurnRecord + /api/metrics summary (cache hit rate)
 │   ├── harness/
@@ -74,11 +78,11 @@ stripe-sales-copilot/
 │   │   ├── prompt.py         # Static system prompt (incl. skill index), customer block, fixed order
 │   │   ├── tools.py          # Tool = function + JSON schema; registry; argument checks
 │   │   ├── skills.py         # SKILL.md loader + the Skill tool
-│   │   ├── hooks.py          # Hook events; SessionStart / PreToolUse / PostToolUse dispatch
+│   │   ├── hooks.py          # The five hook events and their dispatch; TurnState; Allow / Deny / Replace / Pause
 │   │   ├── guardrails.py     # turn_budget, result_cap, turn_result_budget, tool cache, anti_placeholder, internal_canary, leaks()
 │   │   ├── context.py        # Context Budget: attachment stubs, clearing, compaction with a rolling summary (ADR 0006)
 │   │   ├── subagent.py       # Bounded model loop with its own context → a Brief
-│   │   └── core.py           # Harness.run_turn — the loop with tool rounds
+│   │   └── core.py           # HarnessConfig; Harness.run_turn / resume_turn / end_session — the loop
 │   ├── retrieval/
 │   │   ├── graph.py          # Knowledge graph: entities, one-hop expansion
 │   │   ├── linking.py        # Entity Linking vocabulary, expansion, filter; keyword fallback
@@ -100,6 +104,7 @@ stripe-sales-copilot/
 ├── data/
 │   ├── seed.db               # Tracked, read-only: customers, products, usage, policies
 │   └── runtime.db            # Gitignored, created on first start: sessions, messages, attachments, compactions, handoffs, leads, customer_memory, metrics
+├── data.xlsx                 # Source of the seed database
 ├── scripts/build_seed_db.py  # Rebuild data/seed.db from data.xlsx
 ├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
@@ -109,9 +114,11 @@ stripe-sales-copilot/
 │   ├── cases/*.yaml          # 19 customer-viewpoint sessions: expected first action, expectations, rubric
 │   ├── runner.py             # Recorder over the provider, first-action reading, deepseek-flash judge, zero-leak, report
 │   └── reports/latest.md     # the last `pytest -m eval` run (and latest.json)
-├── docs/adr/                 # Architecture decision records
+├── docs/adr/                 # Six architecture decision records
 ├── CONTEXT.md                # Domain glossary
-└── ARCHITECTURE.md
+├── ARCHITECTURE.md           # How the code implements the decisions, with the measured numbers
+├── requirements.txt
+└── pytest.ini                # markers: unit (default) and eval (deselected by default)
 ```
 
 ## Setup
@@ -125,7 +132,10 @@ pip install -r requirements.txt
 DEEPSEEK_API_KEY=sk-...      # deepseek-v4-pro for the conversation, deepseek-flash for sub-agents
 OPENAI_API_KEY=sk-...        # embeddings only (text-embedding-3-small)
 
-# Rebuild the seed database — only after editing data.xlsx; data/seed.db is tracked
+# Two databases: data/seed.db (tracked, read-only: customers, products, usage, policies) and
+# data/runtime.db (gitignored, created on first start: sessions, working memory, attachments,
+# compactions, handoffs, leads, customer memory, metrics; upgraded in place when columns are added).
+# Rebuild the seed database only after editing data.xlsx:
 python scripts/build_seed_db.py
 
 # Rebuild the knowledge index — only after editing knowledge_base/; milvus.db/ is tracked
@@ -167,6 +177,19 @@ Request body for both chat endpoints:
 `customer_id` may be omitted: the session is then a **prospect session** — the customer block says
 nothing is known yet, `get_my_profile` reports no profile, and the model runs discovery and
 captures a lead. A session is bound to its customer on first contact and refuses to switch.
+
+## The UI
+
+`app/static/index.html` is one page with no build step. **Signed in as** picks a seed customer
+or **New prospect**; **New conversation** starts a fresh session for the same customer;
+**End conversation** ends it (reflection runs, and the next session opens with a note on how
+many facts were kept). Each reply shows a Claude Code-style activity list above it — one row
+per tool call (skill loaded, result size, served from cache, blocked by a hook), sub-agent
+searches as they happen, a `context` row when the turn cleared or compacted — then the text
+(streamed once the Stop hooks approved it), the sources as links, and the turn's latency,
+tokens, cache hit and tool rounds. A clarifying question renders its options as clickable
+chips; a handoff proposal renders a card with *Yes, connect me* / *No, keep going*. The
+session id lives in `localStorage` per customer, so a reload continues the session.
 
 ## Testing
 
@@ -298,7 +321,7 @@ The customer-facing version of Claude Code's permission prompt. The model propos
 handoff (or its decline) as the paused tool call's result and the model continues from
 there, telling the customer what happens next. Only a confirmation brings a team in; a
 decline is kept as bookkeeping and contacts nobody. A customer who sends a new message
-instead is treated as declining, so the transcript never carries a dangling tool call.
+instead is treated as declining, so working memory never carries a dangling tool call.
 The policy register's team names are mapped onto the seven Teams and each policy line in
 the prompt names the team behind it. Four conversation skills — `discovery`,
 `pricing_conversation`, `security_compliance`, `objection_handling` — turn the internal

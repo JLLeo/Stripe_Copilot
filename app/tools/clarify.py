@@ -5,7 +5,7 @@ Claude Code's AskUserQuestion, pointed at the customer. When a request could
 reasonably mean different things, the model asks instead of guessing; the
 turn ends with the question, the UI shows the options, and whatever the
 customer picks (or types) is simply the next message. The tool's result is
-written immediately, so the transcript stays valid without any pending state.
+written immediately, so working memory stays a valid sequence without any pending state.
 """
 
 from __future__ import annotations

@@ -19,6 +19,12 @@ __pycache__/
 # Personal notes — not for the repo
 INTERVIEW.md
 
+# Milvus Lite's lock file is created on open, and the partition files it writes when it
+# opens the index are derived from the tracked WAL (the tracked manifests reference no
+# data files); the index itself is tracked
+milvus.db/LOCK
+milvus.db/**/partitions/
+
 # Only the seed database is tracked under data/; runtime state and sidecars are not
 data/*.db
 !data/seed.db

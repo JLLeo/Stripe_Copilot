@@ -617,7 +617,7 @@ def retract_memory(memory_id: int, customer_id: str) -> bool:
 
 
 def dangling_tool_call_ids(working_memory: list[dict[str, Any]]) -> list[str]:
-    """Tool calls in the last assistant message that have no tool result after it — an invalid transcript."""
+    """Tool calls in the last assistant message that have no tool result after it — working memory the model cannot be sent."""
     for i in range(len(working_memory) - 1, -1, -1):
         msg = working_memory[i]
         if msg["role"] == "assistant":

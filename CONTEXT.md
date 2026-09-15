@@ -46,8 +46,10 @@ do not restrict which tools it may use.
 _Avoid_: scenario, intent, skill config
 
 **Sub-agent**:
-A tool whose implementation is its own bounded model loop with an isolated context.
-It returns a brief to the main conversation, never its raw working.
+A tool — or an end-of-session pass — whose implementation is its own bounded model
+loop with an isolated context. It returns a brief to the main conversation, never its
+raw working. Research is one; Reflection runs the same way, and so does the model call
+that writes a Compaction summary.
 _Avoid_: worker, chain, helper LLM
 
 ### Sales
@@ -95,13 +97,22 @@ _Avoid_: internal docs, playbook (as a general term)
 ### Memory
 
 **Session**:
-One conversation between a customer and the agent, from first message to last.
-_Avoid_: chat, thread, conversation (as a noun for the unit)
+One conversation between a customer and the agent, from first message to last. The
+customer-facing UI says "conversation" ("New conversation", "End conversation"), as a
+customer would; code and documents say Session.
+_Avoid_: chat, thread, conversation (as a noun for the unit, in code and documents)
 
 **Working Memory**:
 Everything said and done in the current session, kept in order and only ever
-appended to.
+appended to. What the model sees of it changes only through Clearing and Compaction,
+rarely and only under pressure.
 _Avoid_: history, context window, transcript
+
+**Clearing**:
+Rendering a spent tool result from an earlier turn as a one-line stub that names the
+tool and the size, once the context budget is under pressure. Deterministic, free, and
+tried before any Compaction; the result itself is kept.
+_Avoid_: pruning, truncation, garbage collection
 
 **Compaction**:
 Replacing the oldest part of working memory with a summary once the context budget

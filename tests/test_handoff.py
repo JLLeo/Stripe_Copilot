@@ -76,8 +76,8 @@ def test_seven_canonical_teams_and_every_policy_maps_onto_one():
     from app.tools.handoff import POLICY_TEAM_MAP
 
     for policy in database.get_active_policies():
-        assert policy["escalation_team"] in POLICY_TEAM_MAP, policy["escalation_team"]
-        assert team_for_policy(policy["escalation_team"]) in TEAMS
+        assert policy["handoff_team"] in POLICY_TEAM_MAP, policy["handoff_team"]
+        assert team_for_policy(policy["handoff_team"]) in TEAMS
     assert team_for_policy("Sales Ops / Pricing Team") == "Deal Desk / Pricing"
     assert team_for_policy("Security / Legal") == "Security & Compliance"
     assert team_for_policy("Legal / Tax Specialist") == "Tax Specialist"

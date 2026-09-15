@@ -1,8 +1,8 @@
 # Stripe AI Sales Agent — Architecture
 
 How the code implements the decisions in [`docs/adr/`](docs/adr/), using the
-vocabulary in [`CONTEXT.md`](CONTEXT.md). This document describes what exists on the
-branch now; sections marked *arrives with #N* point at the ticket that adds them.
+vocabulary in [`CONTEXT.md`](CONTEXT.md). Every section describes code on the branch;
+the numbers at the end were measured on the live model.
 
 ## Overview
 
@@ -14,24 +14,30 @@ call anywhere in the path — the model decides, deterministic code guards
 ([ADR 0001](docs/adr/0001-model-decides-guardrails-constrain.md)).
 
 ```
-HTTP (FastAPI)                 Harness                              Provider
-───────────────                ───────                              ────────
+HTTP (FastAPI)                 Harness                                        Provider
+───────────────                ───────                                        ────────
 POST /sales-agent/stream ──►  run_turn(session, customer, msg)
-                               ├─ load_session ─ or ─ SessionStart hooks ─► customer block
-                               ├─ assemble: [static system][customer block][messages…][user] + tools
+                               ├─ load_session ─ or ─ SessionStart hooks ─► customer block (profile + memory)
+                               ├─ settle a dangling handoff · relieve pressure (clear, compact) if the last
+                               │   response was over the high-water mark ─► SSE context_relieved
+                               ├─ a long message ─► attachment; a stub takes its place
+                               ├─ assemble: [static system][customer block][working memory][user] + tools
                                ├─ loop:
-                               │   provider.complete(request) ──────────────► DeepSeek (stream)
-                               │     TextDelta ──► SSE text_delta              reasoning_content
-                               │     ReasoningDelta ──► SSE thinking (once)    tool_calls
+                               │   provider.complete(request) ────────────────────────► DeepSeek (stream)
+                               │     ReasoningDelta ──► SSE thinking (once)              reasoning_content
+                               │     TextDelta ──► held                                  tool_calls
                                │     Completed ──► usage, tool_calls
                                │   for each tool call:
-                               │     PreToolUse hooks ─► Allow | Deny(feedback) | Replace(cached)
-                               │     tool.run ─► PostToolUse hooks (result_cap, cache store)
-                               │     SSE tool_call · skill_loaded | tool_result | hook_blocked
-                               │   until the reply has no tool calls
+                               │     PreToolUse hooks ─► Allow | Deny(feedback) | Replace(cached) | Pause
+                               │     tool.run (worker thread, progress streamed) ─► PostToolUse hooks
+                               │     SSE tool_call · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer
+                               │   until the reply has no tool calls, or a pause / question ends the turn
+                               ├─ Stop hooks on the reply ─► Deny(feedback) sends it back for a rewrite
                                ├─ append_messages(user, assistant, tool…, assistant)
                                ├─ record_turn(tokens, cache hit/miss, tools, skills, hooks, rounds)
-                               └─ SSE done { reply, usage, latency_ms, tool_rounds }
+                               └─ SSE text_delta* · done { reply, usage, latency_ms, tool_rounds, sources, pending_handoff, ask_customer }
+POST /sales-agent/confirm-handoff ──► resume_turn: the paused call's result, then the loop again
+POST /sales-agent/end ──► end_session: SessionEnd hooks ─► reflection on the sub-agent model
 ```
 
 ## Harness — `app/harness/`
@@ -111,7 +117,7 @@ Every request is built in this order and only this order:
 | Position | Content | Stability |
 |---|---|---|
 | `messages[0]` system | **Static prompt**: role, conduct (mirror the customer's language, admit being an AI, decline out-of-scope), the never-do list (no custom pricing, no roadmap promises, no tax/legal advice, no security documents, no fraud guarantees, no internal guidance), the active rows of `sales_policy_updates` sorted by area and title, then the **skill index** — one line per skill, descriptions only | identical for every session in the process; rendered once at startup |
-| `tools` | tool definitions from the registry, in registration order: `Skill`, `get_my_profile`, `list_products`, `get_pricing` | identical for every request in the process |
+| `tools` | the eleven tool definitions from the registry, in registration order: `Skill`, `get_my_profile`, `list_products`, `get_pricing`, `search_knowledge`, `research`, `request_handoff`, `ask_customer`, `capture_lead`, `remember`, `read_attachment` | identical for every request in the process |
 | `messages[1]` system | **Customer block**: profile fields, products in use and the active Customer Memory as `[m<id>] kind — fact` lines, or the prospect notice | identical for the life of the session |
 | `messages[2:]` | working memory, oldest first, then the new customer message | append-only; rewritten only by clearing and compaction, which run rarely and only under pressure |
 
@@ -191,8 +197,8 @@ as each happens, `subagent_finished`, and finally the `tool_result`. The sub-age
 model calls and tokens are metered apart from the main model's (`subagent_calls` counts
 delegations; `subagent_prompt_tokens` / `subagent_completion_tokens` their cost), so
 `done.usage` remains the cost of the conversation the customer is in; a brief served from
-the tool cache is not booked as a new delegation. The same runner will serve Reflection
-(#10).
+the tool cache is not booked as a new delegation. The same runner serves Reflection at
+SessionEnd (see Customer Memory and Reflection).
 
 ### Hooks and guardrails — `hooks.py`, `guardrails.py`
 
@@ -265,7 +271,7 @@ provider's numbers, and sizes use a characters/4 estimate.
    something is always folded; only a single-turn memory is left alone. The last
    customer turn always stays even if it alone is over budget. The summariser is one completion on the
    sub-agent model (`deepseek-flash`, thinking off, no tools, its own system prompt) over
-   the previous summary and a transcript of the folded rows (customer and agent text,
+   the previous summary and a rendering of the folded rows (customer and agent text,
    tool calls as one line each, no tool output). `render_summary()` prefixes the
    `COMPACTION_PREFACE` and appends lines the harness writes itself, whatever the model
    wrote: `Active skills: …` (the skills loaded in the folded rows plus those carried by
@@ -317,7 +323,7 @@ model, so a provider failure can never leave a dangling tool call; then runs the
 without a new customer message, so the follow-up comes from the tool result alone. A
 `handoff_id` that is no longer the pending one is refused (409).
 
-Before any new turn, `_settled_working_memory` makes the transcript valid: a handoff
+Before any new turn, `_settled_working_memory` makes working memory a valid sequence: a handoff
 still pending is resolved as `declined` and its result appended (the customer moved on);
 a pending row whose tool call never reached working memory — the customer disconnected
 while the question was on its way — is marked `abandoned`; any other tool call left
@@ -475,9 +481,9 @@ runtime at a temp file for the whole run.
 
 ### Knowledge graph — `graph.py`, `knowledge_base/knowledge_graph.yaml`
 
-80 nodes, 150 edges in a `networkx.DiGraph`: 16 products, 24 payment methods, 8
-compliance standards, 7 geographies, 5 customer types, plus product lines and the old
-routing scenarios (kept in the file, unused). Two questions are asked of it:
+62 nodes, 126 edges in a `networkx.DiGraph`: 16 products, 24 payment methods, 8
+compliance standards, 7 geographies, 5 customer types, and 2 product lines. Two
+questions are asked of it:
 `related_products(p)` — products one hop away along `integrates_with` / `cross_sell`,
 either direction — and `products_for(topic)` — products that point at a compliance
 standard (`complies_with`), payment method (`supports_method`), geography
@@ -535,7 +541,10 @@ bag-of-words hashes, so texts sharing words are near each other — and asserts 
 legs, fusion, filtering and the absence of the fixture's internal document.
 
 `python -m app.retrieval.ingest` rebuilds `milvus.db/` from scratch with the production
-provider (OpenAI embeddings); the directory is tracked so a clean checkout runs.
+provider (OpenAI embeddings); the directory is tracked so a clean checkout runs — the
+manifests, schemas and write-ahead logs of both collections. Milvus Lite recreates its
+`LOCK` file on open and may write partition files derived from the logs; both are
+ignored (verified: the index opens and searches from the tracked files alone).
 
 ## Observability — `app/metrics.py`
 
@@ -598,8 +607,22 @@ refusal was expected, and nothing leaked. The judge's score is reported (flagged
 and, with `EVAL_MIN_JUDGE_SCORE`, asserted. The report states how many of the defined
 cases ran; the one in the repository is the latest full run.
 
-## What arrives next
+## Measured on the live model
 
-| Ticket | Adds |
+`deepseek-v4-pro` with thinking, `deepseek-flash` for sub-agents, the summariser and the
+judge; September 2026. The README tells each story; the numbers:
+
+| What | Measured |
 |---|---|
-| #13 | final documentation pass |
+| Prompt-cache hit on the second turn of a plain session | 1,024 of 1,169 prompt tokens (88%) |
+| Prompt-cache hit on a turn with skills and tools | 7,424 of 8,322 (89%); 22,016 of 24,004 (92%) on a prospect's second turn |
+| A hard cross-product question, before and with the research sub-agent | 36K prompt tokens in four main-conversation rounds → 30.7K (79% cached) with one delegation; everything the sub-agent read stayed out of the main context |
+| Handoff for a $43M customer asking for a better rate | `pricing_conversation` → profile → Enterprise Sales proposed with the customer's own words; 13 s to the pause, 2 s for the follow-up |
+| Reflection at session end | two facts the agent had not recorded, none of the three it had duplicated; 2 calls, 2,126 prompt tokens |
+| Context relief with a 12K-token budget | 4 spent results cleared on one turn; a compaction a turn later took the reported 15,395 tokens to an 8,140-token request with 8,064 from cache; "remind me: what was our dispute rate" answered from the summary |
+| Evaluation suite (`evals/reports/latest.md`) | first-action accuracy 19/19, leak-free 19/19, both refusals confirmed, mean judge score 4.5 / 5, 6 min 49 s |
+| Unit suite | 169 tests, no network, ~24 s; 19 evaluation cases deselected by default |
+
+The knowledge index holds 177 public chunks from 18 documents in two Milvus Lite
+collections (dense + BM25); the three internal documents are never opened past their
+header except by the canary's blocklist.
