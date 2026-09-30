@@ -45,6 +45,23 @@ conversation calls for it. Skills shape how the model behaves in a situation; th
 do not restrict which tools it may use.
 _Avoid_: scenario, intent, skill config
 
+**Decider**:
+The fast model the harness asks typed questions — yes/no judgments about a Turn, each
+answered with a probability. It writes nothing a Customer reads and it cannot narrow what
+the main model may do; it only answers what it was asked.
+_Avoid_: classifier, router, intent model, fast path
+
+**Priming**:
+Giving the model, before its first call of a Turn, context it would otherwise have fetched
+for itself — the body of a Skill the Decider says the Turn calls for. Priming only adds:
+every tool stays available, so a wrong or missing answer costs a round, never a choice.
+_Avoid_: routing, intent classification, pre-selection, injection
+
+**Redundant Skill Call**:
+A request for a Skill whose body is already in the conversation. It costs a round trip and
+tells us Priming was paid for but not used, so it is counted.
+_Avoid_: cache miss, duplicate load
+
 **Sub-agent**:
 A tool — or an end-of-session pass — whose implementation is its own bounded model
 loop with an isolated context. It returns a brief to the main conversation, never its
@@ -140,6 +157,15 @@ _Avoid_: token limit, max tokens, window size
 A long customer input kept outside the conversation and read by the agent in pieces
 when it needs it, instead of being placed in context whole.
 _Avoid_: upload, file, document (for this purpose)
+
+### Evaluation
+
+**Golden Set**:
+The labelled decisions a change is measured against: for each Turn, the Skills that must be
+chosen and the ones that are merely acceptable. Unlike the customer-viewpoint cases, which
+ask whether a whole Turn behaved well, the Golden Set asks only whether a decision was right
+and how long it took.
+_Avoid_: test set, benchmark, eval suite
 
 ### Retrieval
 

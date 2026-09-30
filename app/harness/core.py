@@ -70,6 +70,12 @@ SAFE_REPLY = (
 MAX_REWRITES = 2  # Stop-hook rewrites before the safe reply replaces the draft
 
 
+def _flag(name: str, default: bool) -> bool:
+    """An on/off environment variable: 1/true/yes/on is on, anything else present is off."""
+    raw = os.environ.get(name)
+    return default if raw is None else raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class UnknownCustomer(LookupError):
     """A session was opened for a customer id that is not in the seed database."""
 
@@ -112,12 +118,25 @@ class HarnessConfig:
     low_water: float = 0.40  # compaction lands here: the summary plus the recent window
     summary_max_tokens: int = 800  # the rolling summary never grows past this
     recent_window_tokens: int = 24_000  # kept verbatim through a compaction
+    # Priming (#14). The Decider answers one yes/no question per Skill before the first model call of
+    # a turn; what it names is added to the context and nothing is ever taken away from the model.
+    priming: bool = False  # off until the turn is wired to it
+    decider_model: str = "jev-latest"
+    decider_timeout_seconds: float = 0.7  # the vendor reports p95 354 ms; past this the turn goes on without it
+    priming_threshold: float = 0.55  # provisional: favours recall, because a missed skill costs a whole round
+    priming_margin: float = 0.15  # provisional: how far the top skill must lead the third before a flat answer is used
 
     def __post_init__(self) -> None:
         if not 0 < self.low_water < self.high_water <= 1:
             raise ValueError("water marks must satisfy 0 < low_water < high_water <= 1")
         if self.summary_max_tokens + self.recent_window_tokens > self.low_water * self.context_budget_tokens:
             raise ValueError("summary_max_tokens + recent_window_tokens must fit under the low-water mark")
+        if not 0 < self.priming_threshold <= 1:
+            raise ValueError("priming_threshold must satisfy 0 < threshold <= 1")
+        if not 0 <= self.priming_margin < 1:
+            raise ValueError("priming_margin must satisfy 0 <= margin < 1")
+        if self.decider_timeout_seconds <= 0:
+            raise ValueError("decider_timeout_seconds must be positive")
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -140,6 +159,11 @@ class HarnessConfig:
             low_water=float(os.environ.get("HARNESS_LOW_WATER", cls.low_water)),
             summary_max_tokens=int(os.environ.get("HARNESS_SUMMARY_MAX_TOKENS", cls.summary_max_tokens)),
             recent_window_tokens=int(os.environ.get("HARNESS_RECENT_WINDOW_TOKENS", cls.recent_window_tokens)),
+            priming=_flag("HARNESS_PRIMING", cls.priming),
+            decider_model=os.environ.get("HARNESS_DECIDER_MODEL", cls.decider_model),
+            decider_timeout_seconds=float(os.environ.get("HARNESS_DECIDER_TIMEOUT_SECONDS", cls.decider_timeout_seconds)),
+            priming_threshold=float(os.environ.get("HARNESS_PRIMING_THRESHOLD", cls.priming_threshold)),
+            priming_margin=float(os.environ.get("HARNESS_PRIMING_MARGIN", cls.priming_margin)),
         )
 
 
