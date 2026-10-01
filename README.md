@@ -109,11 +109,13 @@ stripe-sales-copilot/
 ├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 169 tests, no network, ~24s (builds a real Milvus Lite fixture); + 19 eval cases on demand
+├── tests/                    # 226 tests, no network, ~30s (builds a real Milvus Lite fixture); + 19 eval cases on demand
 ├── evals/
 │   ├── cases/*.yaml          # 19 customer-viewpoint sessions: expected first action, expectations, rubric
 │   ├── runner.py             # Recorder over the provider, first-action reading, deepseek-flash judge, zero-leak, report
-│   └── reports/latest.md     # the last `pytest -m eval` run (and latest.json)
+│   ├── golden/*.yaml         # the Golden Set: 80 labelled turns in four cells, 40 development / 40 held-out
+│   ├── golden.py             # `python -m evals.golden`: four arms decide which skills each turn needs, scored
+│   └── reports/              # latest.md (the last `pytest -m eval` run), golden-dev.md, golden-test.md, each with a JSON twin
 ├── docs/adr/                 # Six architecture decision records
 ├── CONTEXT.md                # Domain glossary
 ├── ARCHITECTURE.md           # How the code implements the decisions, with the measured numbers
@@ -194,7 +196,7 @@ session id lives in `localStorage` per customer, so a reload continues the sessi
 ## Testing
 
 ```bash
-pytest            # 208 tests in ~27s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 226 tests in ~30s; no model calls; temp runtime DB and a temp Milvus Lite index
 pytest -m eval    # the evaluation suite: 19 sessions against DeepSeek, ~5 min, needs .env
 ```
 
@@ -219,6 +221,7 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape, the request timeout |
 | `tests/test_eval_runner.py` | The evaluation runner on the scripted provider: the case set covers every skill, clarifying questions, both handoff triggers and the enterprise override, prospect discovery and refusal; actions are read off recorded completions and only the main model's count; a case checks first action, within-turn and within-session expectations, the handoff team, a refusal where one is expected, and leaks, and judges every reply; the judge's JSON is found among prose; the summary and the report, incomplete runs and table cells included |
 | `tests/test_eval.py` | `pytest -m eval` — see Evaluation |
+| `tests/test_golden.py` | The Golden Set runner on both fakes: the 80 cases in four even cells with every skill required in both splits; a malformed case file reports every problem at once; the two layers and required alternatives; a model arm's skill decision from its first response and its tool decision with the instructions in hand (a follow-up after skill loads or a profile read, which runs for real, while `remember` writes nothing); every model arm on the same bytes; a fixed prior Working Memory with no fabricated tool call; the Decider arm through the production Priming code with every probability kept; abstaining and failing Deciders; micro-averaged numbers per arm and cell; the report and its JSON twin; the command refusing an unknown arm or a Decider without its key |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
 | `tests/test_api_customers.py` | Customer list served through the shared connection |
 
@@ -263,6 +266,71 @@ not just counted; a run of a subset says how many of the defined cases it covere
 numbers are printed at the end of the pytest run. The report in the repository is the
 latest full run; re-running overwrites it, and a changed report belongs in the same commit
 as the behaviour change that caused it.
+
+### The Golden Set
+
+```bash
+python -m evals.golden --split dev     # the four arms over the 40 development cases → evals/reports/golden-dev.md
+python -m evals.golden --split test    # the 40 held-out cases → golden-test.md
+python -m evals.golden --check         # validate the case files; no model calls
+```
+
+The behaviour cases measure whole sessions. The Golden Set measures one decision: which
+skills does this turn need? Four decision-makers take that decision on the same 80
+labelled turns:
+
+- `deepseek-v4-pro` with thinking on, which is how the agent decides today;
+- the same model with thinking off;
+- `deepseek-flash`;
+- the Decider (Jev), through the production Priming code.
+
+The cases sit in `evals/golden/`, four cells of twenty: single- or multi-intent, in a
+single- or multi-turn conversation. Each cell is split ten for development and ten
+held out. A multi-turn case carries a fixed earlier conversation, so every arm decides
+from the same bytes.
+
+Each case labels its skills and its tools in two layers: what must be chosen, and what
+is acceptable besides. Choosing an acceptable extra costs nothing; only a choice outside
+both layers costs precision.
+
+- **Skills**: a model arm's skill decision is the `Skill` calls in its first response.
+  The Decider's is what it would prime.
+- **Tools**: a model arm's tools are scored once its instructions are in hand: its first
+  response's tools, or the next response after its skills are loaded. The Decider is
+  scored on skills only.
+
+The report gives exact-set match, precision, recall, F1, first-action accuracy and
+latency p50/p90, per arm and per cell. The JSON twin keeps every decision and every
+Decider probability, which the threshold fitting in #18 needs.
+
+First full run, October 2026: `golden-dev.md` / `golden-test.md`, skill selection.
+
+| Arm | Exact set | F1 | p50 latency | p90 latency |
+|---|---|---|---|---|
+| `deepseek-v4-pro`, thinking on (today) | 92% / 75% | 97% / 89% | 3.0 s / 2.8 s | 5.4 s / 6.0 s |
+| `deepseek-v4-pro`, thinking off | 50% / 52% | 64% / 73% | 1.9 s / 1.8 s | 2.4 s / 2.9 s |
+| `deepseek-flash` | 85% / 92% | 94% / 97% | 2.0 s / 1.9 s | 3.5 s / 3.3 s |
+| Decider (Jev) at threshold 0.55, margin 0.15 | 70% / 68% | 83% / 85% | 0.20 s / 0.18 s | 0.30 s / 0.23 s |
+
+Forty cases per split make these numbers move. An earlier run of the same cases, before
+a fix to how tool decisions are read, put thinking-on at 85% / 78% exact. Read
+differences under about seven points as noise.
+
+- **Thinking off is not a shortcut.** It skips the `Skill` call on about half of the
+  turns that need one.
+- **`deepseek-flash` decides as well as the main model, about a second faster.**
+- **The Decider is fifteen times faster than the main model, and less complete.** It
+  primes `discovery` on only 3 of the 10 prospect turns that need it, for two reasons:
+  - the "three or more above the threshold" rule keeps only the top skill;
+  - nothing in its state says the customer is a new prospect.
+
+  Both are inputs for #18.
+
+The tool layer is reported, not gated. It scores tools chosen with the instructions in
+hand; reading the profile and remembering a fact are free. Tool recall is 58–73% with
+thinking on, 66–71% for flash, and about 30% with thinking off. The commonest miss in
+every arm is `search_knowledge` on a turn whose reply needs a cited fact: the model
+answers from the skill body instead.
 
 The run in [`evals/reports/latest.md`](evals/reports/latest.md): first-action accuracy
 19/19, leak-free 19/19, both refusals confirmed by the judge, mean judge score 4.5 / 5, in

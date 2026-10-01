@@ -1,0 +1,296 @@
+# Golden Set — multi intent, single turn (#17).
+# Two or more distinct asks in different skill areas, on a Session's first turn: at least two required skills.
+# See evals/golden.py for the schema.
+
+- id: ms-prospect-yoga-studios
+  split: dev
+  customer: prospect
+  message: >-
+    Hi, we're Lotus Loft, three yoga studios in Portland. We'd like members billed monthly without
+    anyone having to chase them, plus a card reader at each front desk for drop-in classes and the
+    odd water bottle. Can Stripe handle both?
+  skills: {required: [discovery, billing, terminal], acceptable: []}
+  tools: {required: [capture_lead, "search_knowledge|research"], acceptable: []}
+  first_action: [skill:discovery, skill:billing, skill:terminal]
+  note: >-
+    Discovery on a prospect's first turn, plus two asks: recurring memberships (billing) and
+    front-desk readers (terminal); the facts go to capture_lead, and "can Stripe handle both" needs
+    cited docs.
+
+- id: ms-prospect-tutoring-es
+  split: test
+  customer: prospect
+  message: >-
+    Hola. Somos Profes en Casa, una plataforma de Madrid que conecta a profesores particulares con
+    familias. Queremos cobrar a las familias, quedarnos con un 15 % de comisión y pagar a los
+    profesores cada semana. ¿Cómo funcionaría con Stripe y cuánto nos costaría?
+  skills: {required: [discovery, connect], acceptable: [pricing_conversation]}
+  tools: {required: [capture_lead, search_knowledge, get_pricing], acceptable: []}
+  first_action: [skill:discovery, skill:connect, skill:pricing_conversation]
+  note: >-
+    In Spanish: discovery on a prospect's first turn, which covers a public-price question itself
+    (answer from get_pricing), and connect for collecting from families and paying tutors with a
+    commission; pricing_conversation is for discounts, so only acceptable. Capture the lead, cite the
+    flow, quote only public Connect rates.
+
+- id: ms-prospect-skincare-zh
+  split: dev
+  customer: prospect
+  message: >-
+    你好，我们是香港的一家跨境电商，卖护肤品到美国和澳洲，一年流水大概 300 万美元。想先了解一下接入 Stripe
+    收款要怎么做；另外我们现在的拒付率挺高的，Stripe 有什么办法吗？
+  skills: {required: [discovery, payments, fraud_protection], acceptable: []}
+  tools: {required: [capture_lead, "search_knowledge|research"], acceptable: []}
+  first_action: [skill:discovery, skill:payments, skill:fraud_protection]
+  note: >-
+    In Chinese: discovery on a prospect's first turn, payments for how to start taking payments, and
+    fraud_protection for the high chargeback rate; capture the lead (Hong Kong, skincare to US and
+    Australia, about $3M) and cite both answers.
+
+- id: ms-prospect-hr-soc2-invoices
+  split: test
+  customer: prospect
+  message: >-
+    We're Benchmark HR, a 12-person HR software startup about to sell annual contracts to mid-size
+    companies. Two things: their procurement teams always ask for our payment provider's SOC 2
+    report, and we need to send invoices on net-30 terms rather than charge cards. How would that
+    work with Stripe?
+  skills: {required: [discovery, security_compliance, billing], acceptable: []}
+  tools: {required: [capture_lead, search_knowledge], acceptable: [request_handoff]}
+  first_action: [skill:discovery, skill:security_compliance, skill:billing]
+  note: >-
+    Discovery on a prospect's first turn; the SOC 2 report is security_compliance, and the standing
+    security-documents policy sends it to Security & Compliance, so the handoff is proposed after the
+    lead is captured; net-30 invoices are billing, answered from cited docs.
+
+- id: ms-1099s-booking-fee-tax
+  split: dev
+  customer: seed:C028
+  message: >-
+    Two things before year end: can Stripe file and deliver 1099s to our service providers for us,
+    and can the Stripe Tax we already use also add sales tax to the booking fee we charge homeowners
+    on top of each job?
+  skills: {required: [connect, tax], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:connect, skill:tax]
+  note: >-
+    Filing and delivering 1099s to providers is Connect's tax reporting for connected accounts, so
+    connect; sales tax on the platform's own booking fee is a Stripe Tax calculation question, so
+    tax; whether the fee is taxable is not asked; both answers need cited docs.
+
+- id: ms-eu-vat-euro-plans
+  split: test
+  customer: seed:C026
+  message: >-
+    We've started signing up customers in Germany and France. Can our subscriptions charge VAT
+    automatically, and can we sell the annual plan priced in euros instead of dollars?
+  skills: {required: [tax, billing], acceptable: [payments]}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile, remember]}
+  first_action: [skill:tax, skill:billing]
+  note: >-
+    VAT on subscriptions is tax, euro-priced annual plans are billing's multi-currency prices, and
+    Adaptive Pricing makes payments adjacent; both answers need cited docs.
+
+- id: ms-residency-snowflake
+  split: dev
+  customer: seed:C006
+  message: >-
+    Our compliance office needs to know where our payment data is stored and whether it can be kept
+    in the US only. Separately, our analytics team wants all our Stripe data landing in Snowflake
+    every night.
+  skills: {required: [security_compliance, data], acceptable: []}
+  tools: {required: [request_handoff, search_knowledge], acceptable: [get_my_profile]}
+  first_action: [skill:security_compliance, skill:data]
+  note: >-
+    Residency for a named country goes beyond the approved wording, so security_compliance hands off
+    (to Enterprise Sales at $18M a year), and the nightly Snowflake sync is data's Data Pipeline,
+    cited.
+
+- id: ms-dashboard-queries-proration
+  split: test
+  customer: seed:C015
+  message: >-
+    Our finance lead is tired of waiting on the data team every time she wants refunds or coupon
+    redemptions broken down by plan; she'd like to answer those herself, right in the Stripe
+    Dashboard. Separately, we're moving some customers from monthly to quarterly billing
+    mid-contract. Does Stripe handle the proration automatically?
+  skills: {required: [data, billing], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:data, skill:billing]
+  note: >-
+    Self-serve queries over Stripe data in the Dashboard are data (Sigma, beside the Data Pipeline
+    they already run) and mid-contract plan changes with proration are billing; both answers need
+    cited docs.
+
+- id: ms-match-interchange-plus
+  split: dev
+  customer: seed:C020
+  message: >-
+    Another provider has offered us interchange-plus pricing. Can you match it? And beyond price,
+    give me one good reason to move the rest of our volume to Stripe rather than consolidate with
+    them.
+  skills: {required: [pricing_conversation, objection_handling], acceptable: []}
+  tools: {required: [request_handoff, search_knowledge], acceptable: [get_my_profile, remember]}
+  first_action: [skill:pricing_conversation, skill:objection_handling]
+  note: >-
+    Matching a competitor's rate is pricing_conversation (never match; hand off, to Enterprise Sales
+    at $36M a year) and the case for Stripe over an alternative is objection_handling, whose reason
+    must be a sourced product fact, so it is searched and cited.
+
+- id: ms-market-stall-qr-orders
+  split: test
+  customer: seed:C013
+  message: >-
+    We're starting a weekend stall at the farmers' market. Can we take cards at the stall itself, and
+    could we also put a QR code on the table so people can order a delivery box from their phone,
+    without us building anything new?
+  skills: {required: [terminal, payments], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:terminal, skill:payments]
+  note: >-
+    Cards at a market stall are terminal (Tap to Pay or a reader) and a no-code QR code for phone
+    orders is payments (Payment Links, for a no-code team); two products, answered from cited docs.
+
+- id: ms-festival-readers-cost
+  split: dev
+  customer: seed:C003
+  message: >-
+    For our summer festival we want to sell tickets and merch at the gate on card readers. Which
+    readers cope with a field that has patchy signal, and what would each sale cost us?
+  skills: {required: [terminal, pricing_conversation], acceptable: []}
+  tools: {required: [get_pricing, search_knowledge], acceptable: [get_my_profile]}
+  first_action: [skill:terminal, skill:pricing_conversation]
+  note: >-
+    Reader choice and offline mode are terminal and the per-sale cost is pricing_conversation; the
+    card-present rate comes from get_pricing and offline mode from cited docs.
+
+- id: ms-fake-sellers-stolen-cards
+  split: test
+  customer: enterprise
+  message: >-
+    We've had a run of new sellers who list fake items, take the money and vanish, and at the same
+    time buyers keep paying with stolen cards. How do we vet sellers properly and keep the bad buyers
+    out?
+  skills: {required: [connect, fraud_protection], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile, request_handoff]}
+  first_action: [skill:connect, skill:fraud_protection]
+  note: >-
+    Seller vetting is Connect onboarding and verification, stolen cards are fraud_protection (Radar
+    on connected-account payments); a cross-product answer that guarantees nothing, and an active
+    fraud problem may go to a person.
+
+- id: ms-ciso-card-data
+  split: dev
+  customer: seed:C017
+  message: >-
+    Our CISO is nervous about a third party holding our residents' card details, and our current
+    processor has never given us any trouble. Why should we move to Stripe?
+  skills: {required: [objection_handling, security_compliance], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile, remember]}
+  first_action: [skill:objection_handling, skill:security_compliance]
+  note: >-
+    "Why move, we already have a processor" is objection_handling and the CISO's card-data concern
+    is security_compliance, answered with public facts confirmed by a search; the CISO's concern may
+    be remembered.
+
+- id: ms-checkout-pci-sales-tax
+  split: test
+  customer: seed:C022
+  message: >-
+    We're on Stripe Checkout. Does that keep our own servers out of PCI scope, and will it add sales
+    tax automatically when we ship parts to other states?
+  skills: {required: [security_compliance, tax], acceptable: [payments]}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:security_compliance, skill:tax]
+  note: >-
+    Names Checkout but asks about PCI scope (security_compliance) and sales tax at checkout (tax),
+    with payments only adjacent; both answers need cited docs, and no liability question is asked.
+
+- id: ms-driver-reports-cashout
+  split: dev
+  customer: seed:C016
+  message: >-
+    Our finance team needs a daily report of what each driver was paid, and we'd like new drivers to
+    be able to cash out right after their first shift. What would you suggest for both?
+  skills: {required: [data, connect], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:data, skill:connect]
+  note: >-
+    Per-driver payout reporting is data (Sigma or Data Pipeline) and cashing out after the first
+    shift is connect (onboarding and instant payouts); a cross-product answer from cited docs.
+
+- id: ms-card-testing-fraud-teams
+  split: test
+  customer: seed:C014
+  message: >-
+    Every time we drop a new item we get a wave of tiny card-testing payments. Would Radar for Fraud
+    Teams rules catch that, and what does it cost per transaction?
+  skills: {required: [fraud_protection, pricing_conversation], acceptable: []}
+  tools: {required: [search_knowledge, get_pricing], acceptable: [get_my_profile]}
+  first_action: [skill:fraud_protection, skill:pricing_conversation]
+  note: >-
+    Card testing and custom rules are fraud_protection (cited, no guaranteed outcome) and the
+    per-transaction price is pricing_conversation, from get_pricing.
+
+- id: ms-buses-route-revenue
+  split: dev
+  customer: seed:C027
+  message: >-
+    We're putting contactless readers on all 400 of our buses next spring, and the board wants fare
+    revenue by route in our data warehouse the morning after. Can Stripe cover both?
+  skills: {required: [terminal, data], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [request_handoff, remember]}
+  first_action: [skill:terminal, skill:data]
+  note: >-
+    Readers on buses are terminal (a roll-out this size may go to a person) and revenue by route in
+    their warehouse is data (Data Pipeline, already in use); the spring roll-out is a dated plan
+    worth remembering.
+
+- id: ms-course-platform-ramble
+  split: test
+  customer: seed:C019
+  message: >-
+    Right, this might be a long one. We run an online course platform out of Manchester: students
+    pay a monthly subscription and get access to everything, and the instructors who make the courses
+    get a share of what their courses earn. At the moment we work out each instructor's share in a
+    spreadsheet at the end of the month and someone on the team does the bank transfers by hand,
+    which is getting silly now we're past sixty instructors, a few of them in Ireland and Spain. On
+    top of that, our accountant pointed out we've got a lot of students in the EU now and asked
+    whether we're charging VAT on those subscriptions properly. I genuinely don't know. Oh, and
+    plenty of students sign up for the yearly plan, then ask to switch to monthly halfway through,
+    which we handle by refunding and re-subscribing them by hand. Can Stripe sort any of this out?
+  skills: {required: [connect, tax, billing], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [request_handoff, remember]}
+  first_action: [skill:connect, skill:tax, skill:billing]
+  note: >-
+    Three asks in one long message: paying instructors (connect), VAT on EU subscriptions (tax;
+    whether they charge it properly is tax advice, so a specialist may be offered), and plan
+    switches with proration (billing).
+
+- id: ms-klarna-vip-chargebacks
+  split: dev
+  customer: seed:C025
+  message: >-
+    We'd like to offer Klarna on our pricier VIP packages. Would that raise our chargeback exposure,
+    and how does Radar treat those orders?
+  skills: {required: [payments, fraud_protection], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:payments, skill:fraud_protection]
+  note: >-
+    Adding a buy-now-pay-later method is payments, and chargeback exposure and Radar on those orders
+    is fraud_protection, with no guaranteed dispute outcome; a cross-product answer from cited docs.
+
+- id: ms-too-technical-currencies
+  split: test
+  customer: seed:C030
+  message: >-
+    Honestly, every Stripe guide I find is full of code and we don't have a developer, so I'm not
+    sure Stripe is for us. And if we did go ahead, could buyers in Europe and Asia pay for our
+    templates in their own currency?
+  skills: {required: [objection_handling, payments], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [get_my_profile]}
+  first_action: [skill:objection_handling, skill:payments]
+  note: >-
+    "Too technical for us" is objection_handling (point to the no-code Payment Links they already
+    use) and paying in local currency is payments (Adaptive Pricing); the no-code and currency facts
+    need cited docs.

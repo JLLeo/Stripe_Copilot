@@ -1,0 +1,474 @@
+# Golden Set — multi intent, multi-turn (#17).
+# Two or more new asks in different areas, decided against a fixed earlier conversation: at least two
+# required skills, none of them already loaded by the prior Working Memory. Some messages also touch an area already
+# in context, which needs no second load. See evals/golden.py for the schema.
+
+- id: mm-offtopic-then-leather
+  split: dev
+  customer: prospect
+  working_memory:
+  - customer: Can you help me fix a layout bug in my Shopify theme?
+    skills: []
+    agent: >-
+      That's outside what I can help with, as I'm Stripe's AI sales assistant. If you're looking at how
+      your shop takes payments, though, I'm glad to help with that.
+  message: >-
+    Ha, fair enough. Actually, yes. We make handmade leather bags, sell about $40k a month online, and
+    we're thinking of leaving Shopify Payments. What would Stripe charge us per sale, and could we use
+    the same account at the weekend craft fairs we do?
+  skills: {required: [discovery, terminal], acceptable: [pricing_conversation, payments]}
+  tools: {required: [capture_lead, get_pricing, search_knowledge], acceptable: []}
+  first_action: [skill:discovery, skill:terminal]
+  note: >-
+    The off-topic opener loaded nothing, so this first business turn of a prospect needs discovery,
+    whose body covers a public-price question, plus terminal for the craft fairs; pricing_conversation
+    and payments are adjacent, the business and volume are lead facts, and the rate comes from
+    get_pricing.
+
+- id: mm-es-oxxo-boleto-impuestos
+  split: dev
+  customer: prospect
+  working_memory:
+  - customer: Hola, tenemos una tienda online de cosmética natural en Barcelona.
+    skills: [discovery]
+    agent: >-
+      ¡Encantado! Para orientaros bien, ¿cuánto vendéis al año más o menos, y en qué países están
+      vuestros clientes?
+  message: >-
+    Facturamos unos 800.000 € al año, casi todo en España. Ahora queremos vender en México y Brasil.
+    ¿Podemos aceptar OXXO y Boleto? ¿Y Stripe calcula los impuestos de cada país?
+  skills: {required: [payments, tax], acceptable: []}
+  tools: {required: [capture_lead, "search_knowledge|research"], acceptable: [request_handoff]}
+  first_action: [skill:payments, skill:tax]
+  note: >-
+    OXXO and Boleto are local payment methods, so payments, and tax calculation in new countries is
+    tax, asked as a capability; volume and target markets are lead facts, availability by country may
+    need Solutions Engineering, and the reply is in Spanish.
+
+- id: mm-zh-disputes-and-front-desk
+  split: test
+  customer: seed:C020
+  working_memory:
+  - customer: 我们有很多中国客人，能不能让他们用支付宝或微信支付付房费？
+    skills: [payments]
+    agent: 可以。Stripe 支持支付宝和微信支付，客人可以在线上付款页面直接选择。具体在你们的国家和业务类型下如何开通，我可以帮你进一步确认。
+  message: 好的，那就麻烦你确认。另外还有两件事：越来越多客人退房以后再向银行申请拒付，我们该怎么应对？还有，酒店前台和餐厅也想用同一个 Stripe 账户刷卡收款，可以吗？
+  skills: {required: [fraud_protection, terminal], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:fraud_protection, skill:terminal]
+  note: >-
+    Guests disputing charges after checkout is fraud_protection and taking cards at the front desk and
+    restaurant is terminal; payments is in context, and the reply is in Chinese.
+
+- id: mm-trial-signups-stolen-cards
+  split: dev
+  customer: seed:C026
+  working_memory:
+  - customer: What does Stripe Billing cost on top of card processing?
+    skills: [pricing_conversation]
+    agent: >-
+      Billing's pay-as-you-go price is 0.7% of billing volume on top of standard processing fees, with
+      no setup fee, and there's a monthly plan on a one-year contract if that suits you better.
+  message: >-
+    Thanks. Two problems, though. People are signing up for our free trial with stolen cards just to
+    burn through the free credits, and we want to change the trial so it takes a card up front and
+    starts charging automatically when it ends. How do we handle both?
+  skills: {required: [fraud_protection, billing], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:fraud_protection, skill:billing]
+  note: >-
+    Trial sign-ups on stolen cards are fraud_protection and a card-up-front trial that converts
+    automatically is billing; pricing_conversation is in context.
+
+- id: mm-fraud-vendor-and-disputes
+  split: test
+  customer: seed:C001
+  working_memory:
+  - customer: Can our sellers choose between daily and weekly payouts?
+    skills: [connect]
+    agent: >-
+      Yes. Each seller's connected account can have its own payout schedule, daily, weekly, monthly or
+      manual, so sellers can be paid on the cadence that suits them.
+  - customer: >-
+      And can sellers see their upcoming payouts somewhere without asking us?
+    skills: []
+    agent: >-
+      Yes. Express accounts come with a Stripe-hosted dashboard showing each seller's balance and
+      upcoming payouts, or you can embed that view in your own site with Connect embedded
+      components.
+  message: >-
+    Good. On fraud, honestly, we already pay a separate fraud-screening vendor and I don't see why we'd
+    move to Radar. And separately, buyers have started disputing orders that were clearly delivered.
+    What can we do about those?
+  skills: {required: [objection_handling, fraud_protection], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [remember]}
+  first_action: [skill:objection_handling, skill:fraud_protection]
+  note: >-
+    Resisting a move from an existing fraud vendor is an objection and disputes on delivered orders are
+    fraud_protection; connect is in context, and the vendor already in place is a durable fact to
+    remember.
+
+- id: mm-listing-fee-and-vendor-payouts
+  split: dev
+  customer: seed:C010
+  working_memory:
+  - customer: Can we see which vendors sell the most each month without exporting spreadsheets?
+    skills: [data]
+    agent: >-
+      Yes. Sigma lets you query your payments with SQL in the Dashboard, and if each payment is tagged
+      with its vendor, a monthly sales-by-vendor report is a short saved query.
+  - customer: >-
+      Can that report run on its own every month?
+    skills: []
+    agent: >-
+      Yes. Sigma queries can be scheduled, so the report runs each month and the results are ready
+      without anyone rerunning it.
+  message: >-
+    Good. Two bigger changes we're planning. We want to charge every vendor a $29 monthly listing fee,
+    and we want to stop paying vendors by hand and have their share sent to them each week after our
+    commission. How would both work?
+  skills: {required: [billing, connect], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: [remember]}
+  first_action: [skill:billing, skill:connect]
+  note: >-
+    A monthly listing fee is a subscription, so billing, and paying vendors their share is connect;
+    data is in context, and the planned changes are worth remembering.
+
+- id: mm-eu-tax-cost-and-registration
+  split: test
+  customer: seed:C014
+  working_memory:
+  - customer: Players in Japan keep asking to pay at convenience stores. Is that possible?
+    skills: [payments]
+    agent: >-
+      Yes. Konbini payments let players get a payment code at checkout and pay in cash at a Japanese
+      convenience store, and the payment is confirmed back to you once they've paid.
+  message: >-
+    Good. We've also started selling to players in the EU and UK. What would Stripe Tax cost us, and can
+    it register us for VAT there?
+  skills: {required: [pricing_conversation, tax], acceptable: []}
+  tools: {required: [get_pricing, search_knowledge], acceptable: []}
+  first_action: [skill:pricing_conversation, skill:tax]
+  note: >-
+    The cost of Stripe Tax is pricing_conversation with get_pricing, and whether Stripe can handle VAT
+    registration is tax, a capability rather than advice on obligations; payments is in context.
+
+- id: mm-one-click-and-method-report
+  split: dev
+  customer: seed:C013
+  working_memory:
+  - customer: What does Link cost us?
+    skills: [pricing_conversation]
+    agent: >-
+      Link adds no fee of its own when shoppers pay with a saved card; you pay the standard card rate.
+      Link Instant Bank Payments are 2.6% + 30¢ per transaction.
+  message: >-
+    Thanks. Two other things. Can returning shoppers buy with one click right on the product page
+    instead of going through the cart, and can our marketer see which payment methods convert best each
+    week without asking a developer?
+  skills: {required: [payments, data], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:payments, skill:data]
+  note: >-
+    One-click buying on the product page is payments (Express Checkout and Link) and a weekly
+    self-serve report on payment methods is data (Sigma); pricing_conversation is in context.
+
+- id: mm-ca-au-bank-debits
+  split: dev
+  customer: seed:C015
+  working_memory:
+  - customer: Can we offer a 14-day free trial that converts to paid automatically?
+    skills: [billing]
+    agent: >-
+      Yes. Billing supports trials that convert to paid when they end, and you can collect a card up
+      front or only when the trial finishes.
+  message: >-
+    Great. Leadership also just decided we launch in Canada and Australia next quarter, trial included.
+    Can customers there pay by bank debit instead of card, and what does that cost per payment in each
+    country?
+  skills: {required: [payments, pricing_conversation], acceptable: []}
+  tools: {required: [search_knowledge, get_pricing], acceptable: [remember]}
+  first_action: [skill:payments, skill:pricing_conversation]
+  note: >-
+    Local bank debits are payment-method coverage, so payments, and their per-payment cost is
+    pricing_conversation with get_pricing; billing is in context, and next quarter's launch is a durable
+    fact to remember.
+
+- id: mm-bank-login-and-instant-verify
+  split: dev
+  customer: seed:C012
+  working_memory:
+  - customer: We send thousands of premium invoices a month. Can Stripe chase late payers automatically?
+    skills: [billing]
+    agent: >-
+      Yes. Invoicing sends automatic reminder emails, retries saved payment methods with Smart Retries,
+      and gives each policyholder a hosted page to pay by card or bank transfer.
+  message: >-
+    Our compliance team has two questions about that payment page. If a policyholder pays by linking
+    their bank account, does any part of their bank login touch our systems? And can the account be
+    verified instantly instead of with micro-deposits?
+  skills: {required: [security_compliance, payments], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:security_compliance, skill:payments]
+  note: >-
+    Whether bank credentials touch their systems is security_compliance and instant bank account
+    verification is payments (bank debits through Financial Connections); billing is in context.
+
+- id: mm-warehouse-counters-sales-tax
+  split: test
+  customer: seed:C022
+  working_memory:
+  - customer: Our big-ticket orders for engines and transmissions attract stolen cards. How can Stripe help?
+    skills: [fraud_protection]
+    agent: >-
+      Radar scores every payment for fraud risk, and you can add rules so large or unusual orders get 3D
+      Secure or manual review before you ship, instead of blocking them outright.
+  - customer: >-
+      Can our team look at the flagged orders before they're cancelled?
+    skills: []
+    agent: >-
+      Yes. Rules can send risky orders to a review queue in the Dashboard, where your team approves
+      or refunds each one.
+  message: >-
+    Helpful. We're also opening walk-in counters at our warehouses in Ohio and Texas. Can staff there
+    take cards on the same account, and will Stripe Tax work out the sales tax on those in-person sales
+    too?
+  skills: {required: [terminal, tax], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:terminal, skill:tax]
+  note: >-
+    Walk-in counters are terminal and sales tax on in-person sales is tax, asked as a capability;
+    fraud_protection is in context.
+
+- id: mm-onsite-cut-and-bank-transfer
+  split: test
+  customer: seed:C028
+  working_memory:
+  - customer: Our providers want to take payment on the spot when a job is finished. What's the simplest way?
+    skills: [terminal]
+    agent: >-
+      Tap to Pay lets providers take contactless cards and wallets on their own iPhone or Android phone
+      with no extra hardware. If they'd rather have a dedicated device, the Reader M2 is a small mobile
+      reader.
+  message: >-
+    Nice. Do we still keep our 10% platform cut automatically on those on-site payments? And some
+    homeowners want to pay for bigger jobs by bank transfer instead of card. Can they?
+  skills: {required: [connect, payments], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:connect, skill:payments]
+  note: >-
+    Keeping a platform fee on providers' payments is connect and bank-transfer payment methods are
+    payments; terminal is in context.
+
+- id: mm-bank-terminals-objection
+  split: test
+  customer: seed:C005
+  working_memory:
+  - customer: Lots of our online shoppers are in the US and Europe. Can they pay in their own currencies?
+    skills: [payments]
+    agent: >-
+      Yes. Stripe accepts 135+ currencies, and Adaptive Pricing can show each shopper prices in their
+      local currency automatically while you're paid out in Canadian dollars.
+  - customer: >-
+      Do we have to charge GST on those foreign orders?
+    skills: [tax]
+    agent: >-
+      Stripe Tax can calculate GST, HST and foreign VAT where you're registered. Whether you need to
+      collect on a given foreign order is a question for a tax specialist, and I can connect you
+      with one.
+  message: >-
+    Good. For our two Toronto stores, though, we already rent card terminals from our bank and switching
+    sounds like more hassle than it's worth. What would we gain, and would the in-store sales sit next to
+    the online ones in the same reports?
+  skills: {required: [objection_handling, terminal], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [remember]}
+  first_action: [skill:objection_handling, skill:terminal]
+  note: >-
+    Reluctance to leave the bank's rented terminals is an objection and unified in-store and online
+    reporting is terminal; payments is in context, and the bank terminals already in place are a durable
+    fact to remember.
+
+- id: mm-dispute-analysis-selective-3ds
+  split: dev
+  customer: seed:C025
+  working_memory:
+  - customer: Can fans buy tickets for several shows in one checkout?
+    skills: [payments]
+    agent: >-
+      Yes. Checkout takes multiple line items in one session, so fans can buy tickets for several shows
+      plus add-ons in a single payment.
+  - customer: >-
+      Can fans keep their card on file for the next on-sale?
+    skills: []
+    agent: >-
+      Yes. With their consent Checkout can save a fan's card, and Link lets returning fans pay in a
+      couple of taps.
+  message: >-
+    Good, that covers the cart. Two things before our next on-sale. Our risk analyst wants every dispute
+    from the past year in our warehouse to see which events attract them, and we'd like 3D Secure only
+    on the riskiest orders instead of on everyone. Can we do both?
+  skills: {required: [data, fraud_protection], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:data, skill:fraud_protection]
+  note: >-
+    Disputes landing in their warehouse for analysis is Data Pipeline, so data, and 3D Secure only on
+    risky orders is fraud_protection; payments is in context.
+
+- id: mm-au-residency-new-countries
+  split: test
+  customer: seed:C024
+  working_memory:
+  - customer: What does it cost to pay a contractor in another country?
+    skills: [pricing_conversation]
+    agent: >-
+      International payouts are priced per payout and vary by destination, so I'll pull the exact public
+      figures for the countries you pay into rather than guess.
+  message: >-
+    Thanks, send those over when you have them. Our compliance lead also has two questions. Can
+    contractors' bank and ID details be stored in Australia only? And could we start paying contractors
+    in the Philippines and Vietnam as well?
+  skills: {required: [security_compliance, connect], acceptable: []}
+  tools: {required: [request_handoff, search_knowledge], acceptable: []}
+  first_action: [skill:security_compliance, skill:connect]
+  note: >-
+    Keeping data in one country goes beyond the approved residency wording, so security_compliance with
+    a Security & Compliance handoff, and paying contractors in new countries is connect, with coverage
+    to cite; pricing_conversation is in context.
+
+- id: mm-net30-and-campaign-report
+  split: test
+  customer: seed:C023
+  working_memory:
+  - customer: Can we put a donation form on our own website instead of sending people to a link?
+    skills: [payments]
+    agent: >-
+      Yes. You can embed Checkout on your site, or use Elements if your developers want full control of
+      the form's design; both keep card details off your servers.
+  message: >-
+    Great, we'll embed it. Separately, the foundations that fund us want proper invoices with net-30
+    terms, and our board wants a monthly report of donations by campaign, including the ones through
+    that new form. Can Stripe do both?
+  skills: {required: [billing, data], acceptable: []}
+  tools: {required: ["search_knowledge|research"], acceptable: []}
+  first_action: [skill:billing, skill:data]
+  note: >-
+    Net-30 invoices are Invoicing, so billing, and a monthly report by campaign is Sigma, so data;
+    payments is in context.
+
+- id: mm-bike-shop-counters
+  split: test
+  customer: prospect
+  working_memory:
+  - customer: Hi, we're opening a second bike shop in Denver and relaunching our online store at the same time.
+    skills: [discovery]
+    agent: >-
+      Congratulations on the new shop! So I can point you to the right setup, roughly how much do you
+      expect to sell in a year, and how will it split between the stores and online?
+  message: >-
+    Around $1.2M a year, about half online and half in the stores. Our old site got hit with a lot of
+    stolen-card orders, and we need card readers for the counters in both shops. What would you set up?
+  skills: {required: [terminal, fraud_protection], acceptable: [payments]}
+  tools: {required: [capture_lead, "search_knowledge|research"], acceptable: []}
+  first_action: [skill:terminal, skill:fraud_protection]
+  note: >-
+    Counter readers are terminal and stolen-card orders are fraud_protection, with the online half
+    touching payments; the volume, the split and the needs are lead facts.
+
+- id: mm-ops-meeting-dump
+  split: dev
+  customer: seed:C016
+  working_memory:
+  - customer: Can restaurants on our platform get their payouts daily instead of weekly?
+    skills: [connect]
+    agent: >-
+      Yes. Each restaurant's connected account can be set to a daily payout schedule, so their earnings
+      are sent every day instead of once a week.
+  - customer: >-
+      Can we hold payouts to a restaurant we're investigating?
+    skills: []
+    agent: >-
+      Yes. You can switch that restaurant's connected account to manual payouts, so its funds stay
+      on balance until you release them.
+  - customer: >-
+      And what would an instant payout cost a restaurant?
+    skills: [pricing_conversation]
+    agent: >-
+      Instant Payouts carry a fee on each payout, set out in Stripe's public pricing. I can pull the
+      exact figure for you.
+  message: >-
+    OK so a few things came up in our ops meeting this morning and I'm just going to dump them here,
+    sorry. The restaurants keep asking whether we're supposed to be collecting sales tax on delivery
+    orders for them or whether that's on them, and honestly nobody here knows, and some of them are in
+    states we've never operated in before. Then our legal team wants to know where the driver ID scans
+    from onboarding are stored and how long you keep them, because a couple of states are asking. Oh,
+    and the daily payouts you described are fine, the restaurants are happy with that. Can you help with
+    the first two?
+  skills: {required: [tax, security_compliance], acceptable: []}
+  tools: {required: [request_handoff], acceptable: [search_knowledge]}
+  first_action: [skill:tax, skill:security_compliance]
+  note: >-
+    Who must collect sales tax on delivery orders is a liability question, so tax, and where driver ID
+    scans are kept and for how long falls under the identity-data handling policy, so
+    security_compliance, both ending in a handoff (Enterprise Sales at $43M); the payouts aside is
+    connect, already in context.
+
+- id: mm-soc2-and-three-year-discount
+  split: test
+  customer: seed:C008
+  working_memory:
+  - customer: Can Billing meter GPU-hours per customer and bill them monthly in arrears?
+    skills: [billing]
+    agent: >-
+      Yes. Usage-based pricing in Billing records each customer's metered usage, such as GPU-hours, and
+      invoices it at the end of each billing period, with tiered or volume rates if you need them.
+  - customer: >-
+      Can customers see their usage to date in the middle of the month?
+    skills: []
+    agent: >-
+      Yes. Metered usage is recorded as it comes in, so you can show customers their usage so far
+      and a preview of the upcoming invoice before the period closes.
+  message: >-
+    Good, that's the model we want. Before we expand, our security team needs your SOC 2 report, and
+    procurement wants a discount in exchange for a three-year committed spend. Who handles those?
+  skills: {required: [security_compliance, pricing_conversation], acceptable: []}
+  tools: {required: [request_handoff], acceptable: [remember]}
+  first_action: [skill:security_compliance, skill:pricing_conversation]
+  note: >-
+    The SOC 2 report and a committed-spend discount are both reserved for humans, so security_compliance
+    and pricing_conversation with a handoff (Enterprise Sales at $32M); billing is in context, and the
+    chosen usage model is worth remembering.
+
+- id: mm-bookkeeper-quickbooks
+  split: dev
+  customer: prospect
+  working_memory:
+  - customer: Hi, we're a small design agency looking at better ways to bill our clients.
+    skills: [discovery]
+    agent: >-
+      Nice to meet you! So I can point you to the right setup, how do you bill clients today, and roughly
+      how much do you invoice in a month?
+  - customer: >-
+      About 25 clients on monthly retainers, around $30K a month in total. Do we have to charge sales tax
+      on design services?
+    skills: [tax]
+    agent: >-
+      Stripe Tax can calculate and collect sales tax where it applies and alert you as you near a
+      registration threshold. Whether design services are taxable in your state is a question for a tax
+      specialist, and I can connect you with one.
+  - customer: >-
+      Makes sense. Once a client pays, how quickly would the money reach our bank?
+    skills: [payments]
+    agent: >-
+      In the US, card payments usually reach your bank two business days after the charge on
+      Stripe's standard payout schedule, with no setup or monthly fee for that.
+  message: >-
+    OK, thanks. Honestly, our bookkeeper thinks we should keep sending invoices from QuickBooks and that
+    Stripe would just be one more tool. If we did switch, could Stripe send the retainer invoices every
+    month and charge clients' cards automatically?
+  skills: {required: [objection_handling, billing], acceptable: []}
+  tools: {required: [capture_lead, search_knowledge], acceptable: []}
+  first_action: [skill:objection_handling, skill:billing]
+  note: >-
+    The bookkeeper's preference for QuickBooks is an objection and recurring retainer invoices charged
+    automatically are billing; discovery and tax are in context, and the current tool and the
+    bookkeeper's view are lead facts.

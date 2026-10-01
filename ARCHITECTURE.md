@@ -567,8 +567,8 @@ accident and this is where a break shows first.
 
 ## Testing
 
-169 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~24 s. The app under test
-always starts with a harness over a `ScriptedProvider` (installed by `conftest.py`), so
+224 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~30 s. The app under test
+always starts with a harness over a `ScriptedProvider` and a `ScriptedDecider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys. The 19 evaluation cases carry the `eval`
 marker and are deselected by default (`addopts = -m "not eval"`).
 
@@ -614,6 +614,55 @@ refusal was expected, and nothing leaked. The judge's score is reported (flagged
 and, with `EVAL_MIN_JUDGE_SCORE`, asserted. The report states how many of the defined
 cases ran; the one in the repository is the latest full run.
 
+### The Golden Set — `evals/golden.py`, `evals/golden/*.yaml`
+
+A measurement of one decision — which skills a turn needs — taken four ways on the same
+labelled turns. It runs on demand, as `python -m evals.golden --split dev|test|all`, never
+under pytest, and on a fresh temporary runtime database, so no arm sees Customer Memory
+another did not. `--check` validates the case files and calls no model.
+
+- **Cases.** Eighty `GoldenCase`s in four files of twenty, one per cell — single- or
+  multi-intent, single- or multi-turn — split ten development / ten held-out per cell.
+  Each labels skills and tools in two layers (`Labels`): required entries, each a tuple of
+  alternatives (`search_knowledge|research`), and acceptable extras. `first_action` uses
+  the behaviour cases' vocabulary. `load_golden()` checks every case against the real
+  skill and tool names and reports every problem at once. Its rules: no unknown keys, at
+  most one required skill for single intent and at least two for multi intent, a prior
+  `working_memory` only on multi-turn cases, no label on a skill that Working Memory
+  already loaded, no name required twice, no required tool that no skill informs, and
+  first actions consistent with the labels.
+- **The fixed prior Working Memory** of a multi-turn case is rendered by
+  `working_memory_messages()` as the harness stores it with Priming on. A turn's skills become a
+  primed `system` message before its customer message, and the agent's reply is plain
+  text. No tool call is fabricated, so no reasoning is invented, and the bytes are valid
+  and identical for every arm (verified live with thinking on, thinking off and
+  `deepseek-flash`).
+- **Arms** (`arms_for`): the main model with thinking on, the main model with thinking
+  off, the sub-agent model as the research sub-agent runs it, and the Decider. A model
+  arm gets `turn_messages()`, which is the request a turn's first call sends with Priming
+  off: the static prompt, the customer block, the prior Working Memory, the message, and
+  every tool. Its skill decision is the `Skill` calls of that first response. Its tool
+  decision is taken with the instructions in hand. That is the first response's own
+  tools when it called one a skill informs; `paired` is set when it also loaded a skill,
+  which means it chose that tool before reading its instructions. Otherwise, when the
+  first response only loaded skills or read the profile, it is the next response, after
+  those calls are answered as the harness would answer them. A skill gets its body, or
+  "already in context". A profile or catalogue read runs for real. `remember` is
+  acknowledged without writing, so no arm leaves a fact that a later case's Decider state
+  would read. Tools no skill informs (`UNINFORMED_TOOLS`) are recorded but never scored.
+  The
+  Decider arm calls `priming.prime()` itself, at the configured threshold, margin and
+  timeout. Its decision is what would be primed, and `Priming.probabilities` keeps every
+  answer for the threshold fitting in #18. A Decider failure counts as a decision to
+  prime nothing.
+- **Scoring.** A choice inside either layer never costs precision. `summarise()` gives,
+  per arm and per cell, exact-set match, micro-averaged precision, recall and F1,
+  first-action accuracy, and p50/p90 latency to the decision. The tool layer is reported
+  for the model arms only. There is no ranking metric. A failed call is recorded on its
+  `Decision` and counted, not scored. `write_report()` writes
+  `evals/reports/golden-<split>.md` and its JSON twin, which hold every decision, every
+  probability and the labels.
+
 ## Measured on the live model
 
 `deepseek-v4-pro` with thinking, `deepseek-flash` for sub-agents, the summariser and the
@@ -628,7 +677,8 @@ judge; September 2026. The README tells each story; the numbers:
 | Reflection at session end | two facts the agent had not recorded, none of the three it had duplicated; 2 calls, 2,126 prompt tokens |
 | Context relief with a 12K-token budget | 4 spent results cleared on one turn; a compaction a turn later took the reported 15,395 tokens to an 8,140-token request with 8,064 from cache; "remind me: what was our dispute rate" answered from the summary |
 | Evaluation suite (`evals/reports/latest.md`) | first-action accuracy 19/19, leak-free 19/19, both refusals confirmed, mean judge score 4.5 / 5, 6 min 49 s |
-| Unit suite | 169 tests, no network, ~24 s; 19 evaluation cases deselected by default |
+| Golden Set, skill selection (`evals/reports/golden-dev.md` / `golden-test.md`, October 2026) | exact set and F1: thinking on 92% / 75% and 97% / 89% at p50 3.0 / 2.8 s; thinking off 50% / 52% and 64% / 73% at 1.9 / 1.8 s; `deepseek-flash` 85% / 92% and 94% / 97% at 2.0 / 1.9 s; Decider 70% / 68% and 83% / 85% at 0.20 / 0.18 s |
+| Unit suite | 226 tests, no network, ~30 s; 19 evaluation cases deselected by default |
 
 The knowledge index holds 177 public chunks from 18 documents in two Milvus Lite
 collections (dense + BM25); the three internal documents are never opened past their

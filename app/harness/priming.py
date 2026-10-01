@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app import database
@@ -58,6 +58,7 @@ class Priming:
     message: dict[str, Any] | None = None
     skipped: str | None = None
     decider_ms: int = 0
+    probabilities: dict[str, float] = field(default_factory=dict)  # the Decider's answer for every skill it was asked about
 
 
 def prime(
@@ -80,12 +81,13 @@ def prime(
         elapsed = int((time.perf_counter() - started) * 1000)
         if not answers.answered:
             return Priming(skipped=answers.skipped, decider_ms=elapsed)
-        chosen, skipped = choose(
-            {n: p for n, p in answers.probabilities.items() if n in asked}, config.priming_threshold, config.priming_margin,
-        )
+        probabilities = {n: p for n, p in answers.probabilities.items() if n in asked}
+        chosen, skipped = choose(probabilities, config.priming_threshold, config.priming_margin)
         if not chosen:
-            return Priming(skipped=skipped, decider_ms=elapsed)
-        return Priming(skills=tuple(chosen), message=primed_message(chosen, skills), decider_ms=elapsed)
+            return Priming(skipped=skipped, decider_ms=elapsed, probabilities=probabilities)
+        return Priming(
+            skills=tuple(chosen), message=primed_message(chosen, skills), decider_ms=elapsed, probabilities=probabilities,
+        )
     except Exception:  # noqa: BLE001 — the Decider's contract says it never raises; this is for when it, or this module, is wrong
         log.warning("priming failed; the turn goes on without it", exc_info=True)
         return Priming(skipped=SKIP_ERROR, decider_ms=int((time.perf_counter() - started) * 1000))

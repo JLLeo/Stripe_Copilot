@@ -1,0 +1,285 @@
+# Golden Set — single intent, single turn (#17).
+# One thing asked, on a Session's first turn: at most one required skill. See evals/golden.py for the schema.
+
+- id: ss-prospect-mobile-grooming
+  split: dev
+  customer: prospect
+  message: >-
+    Hi, my sister and I run Pawsome Mobile Grooming: two vans around Austin, about 25 appointments
+    a week, and right now clients pay us by Venmo or cash at the van door. A friend said Stripe could
+    tidy this up. What would you suggest for a business like ours?
+  skills: {required: [discovery], acceptable: [terminal]}
+  tools: {required: [capture_lead], acceptable: [search_knowledge, ask_customer]}
+  first_action: [skill:discovery]
+  note: >-
+    A prospect's first turn needs discovery, and the concrete facts (company, mobile in-person
+    grooming, two vans, about 25 appointments a week, paid by Venmo or cash) go to capture_lead at
+    once; paying in person makes terminal the adjacent area.
+
+- id: ss-prospect-card-fee-first
+  split: test
+  customer: prospect
+  message: >-
+    Before I tell you anything about us: what do you charge on an ordinary card payment?
+  skills: {required: [discovery], acceptable: [pricing_conversation]}
+  tools: {required: [get_pricing], acceptable: [ask_customer]}
+  first_action: [skill:discovery]
+  note: >-
+    The discovery body covers a prospect who asks price first (quote the public rate from
+    get_pricing, then learn their needs) and reserves pricing_conversation for discount or custom
+    asks, so pricing_conversation is only acceptable; nothing concrete is known yet, so no lead.
+
+- id: ss-prospect-cafes-es
+  split: dev
+  customer: prospect
+  message: >-
+    Hola, somos Café Tierra Alta: tenemos tres cafeterías en Monterrey y queremos empezar a vender
+    nuestro café en grano por internet, con envíos a todo México. ¿Por dónde empezamos con Stripe?
+  skills: {required: [discovery], acceptable: [payments]}
+  tools: {required: [capture_lead], acceptable: [search_knowledge, ask_customer]}
+  first_action: [skill:discovery]
+  note: >-
+    A Spanish-speaking prospect's first turn is discovery, answered in Spanish; company, three
+    cafés in Monterrey and the plan to sell beans online are concrete enough for capture_lead, and
+    online selling makes payments the adjacent area.
+
+- id: ss-prospect-45m-call
+  split: test
+  customer: prospect
+  message: >-
+    We're Nordvik Outdoor, roughly $45M a year in online sales across the Nordics and Germany.
+    Our current processor contract ends in March, so we're looking at Stripe. Could you set up a
+    call with the right people on your side?
+  skills: {required: [discovery], acceptable: []}
+  tools: {required: [capture_lead], acceptable: [request_handoff]}
+  first_action: [skill:discovery]
+  note: >-
+    Discovery is required on a prospect's first turn and says a prospect above $10M goes to
+    Enterprise Sales whatever the question, with the lead captured first; company, volume, markets
+    and timeline are all given, so capture_lead is the first call and the handoff may share its round
+    or follow it.
+
+- id: ss-offtopic-job-ad
+  split: dev
+  customer: seed:C030
+  message: >-
+    Could you help me write a job ad for a part-time frontend developer? Nothing to do with
+    payments, I just need it by tomorrow.
+  skills: {required: [], acceptable: []}
+  tools: {required: [], acceptable: []}
+  first_action: [answer]
+  note: >-
+    Writing a job ad is outside Stripe and payments, so the agent declines briefly and offers to
+    return to Stripe topics, with no skill and no tool.
+
+- id: ss-person-video-call
+  split: test
+  customer: seed:C021
+  message: >-
+    Is there someone at Stripe I could get on a video call this week? Typing all of this out is
+    slow.
+  skills: {required: [], acceptable: []}
+  tools: {required: [request_handoff], acceptable: [get_my_profile]}
+  first_action: [handoff]
+  note: >-
+    A plain request for a person with no area to advise on: propose a Sales Representative
+    handoff, and no skill is needed.
+
+- id: ss-renewals-quietly-lapse
+  split: dev
+  customer: seed:C009
+  message: >-
+    Okay, bit of background first. We run a streaming fitness app, people pay monthly, and sign-ups
+    have honestly been fine, up every month since spring. What keeps coming up in our Monday meeting
+    is that a decent slice of members never actually decide to leave. Their renewal just doesn't go
+    through (the card expired, or the bank said no that day, or they'd hit their limit) and then
+    they get one generic email they probably never open, and that's it, they're gone. Our one
+    support person spends half her week chasing people by hand, and our head of growth reckons we're
+    losing a few percent of revenue a month this way without anyone choosing to cancel. Is there
+    anything on your side that would catch these before we lose them?
+  skills: {required: [billing], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile]}
+  first_action: [skill:billing]
+  note: >-
+    A long, product-free description of involuntary churn from failed renewals, which is Smart
+    Retries and dunning in billing (declined renewals are not fraud), and the recovery features
+    must be cited.
+
+- id: ss-prepaid-credits-january
+  split: test
+  customer: seed:C008
+  message: >-
+    From January we're moving our enterprise contracts to prepaid compute credits that monthly
+    usage draws down. Can Stripe Billing handle the credit balances, or do we keep tracking them in
+    spreadsheets?
+  skills: {required: [billing], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile, remember]}
+  first_action: [skill:billing]
+  note: >-
+    Prepaid credits drawn down by metered usage is a Billing capability question that needs cited
+    docs, and the January switch is a dated plan worth remembering for this enterprise account.
+
+- id: ss-providers-same-day-pay
+  split: dev
+  customer: seed:C028
+  message: >-
+    Our cleaners and plumbers keep asking to be paid the same day they finish a job instead of
+    waiting for the Friday run. Can we do that for them?
+  skills: {required: [connect], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile, get_pricing]}
+  first_action: [skill:connect]
+  note: >-
+    Paying service providers faster is a Connect payout question (payout schedules, instant
+    payouts) although Connect is never named; the answer needs cited docs, and Instant Payouts carry
+    a fee, so a price lookup is no error.
+
+- id: ss-month-end-netsuite
+  split: test
+  customer: seed:C018
+  message: >-
+    Every month-end our finance team spends about three days matching Stripe payouts to the
+    invoices in NetSuite. Is there a cleaner way to do this?
+  skills: {required: [data], acceptable: [billing]}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile]}
+  first_action: [skill:data]
+  note: >-
+    Reconciliation and close is the data skill's trigger (Sigma and Data Pipeline, both in use
+    here); invoice reconciliation sits in billing's Invoicing, so billing is adjacent.
+
+- id: ss-gem-packs-disputed
+  split: dev
+  customer: seed:C014
+  message: >-
+    Players buy gem packs, spend every last gem, and then tell their bank they never made the
+    purchase. How do we fight back on these?
+  skills: {required: [fraud_protection], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile]}
+  first_action: [skill:fraud_protection]
+  note: >-
+    Friendly fraud described without naming disputes or Radar is fraud_protection, and the dispute
+    tooling must be cited without promising outcomes.
+
+- id: ss-good-buyers-blocked
+  split: test
+  customer: seed:C022
+  message: >-
+    A few of our best repeat buyers say their orders get blocked at payment, even though they've
+    bought from us for years. How do we stop turning away people who are obviously legit?
+  skills: {required: [fraud_protection], acceptable: [payments]}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile, ask_customer]}
+  first_action: [skill:fraud_protection]
+  note: >-
+    Good customers being declined is a false-decline question (Radar risk settings, allowlists) even
+    though it reads like a checkout problem, so payments is only adjacent; asking whether the block
+    is Radar or the bank is reasonable.
+
+- id: ss-payouts-provider-objection
+  split: dev
+  customer: seed:C024
+  message: >-
+    Honestly, wouldn't a payouts-only provider be simpler and cheaper for paying our contractors?
+    Why keep payouts on Stripe?
+  skills: {required: [objection_handling], acceptable: [connect]}
+  tools: {required: [], acceptable: [search_knowledge, get_my_profile, get_pricing]}
+  first_action: [skill:objection_handling]
+  note: >-
+    Weighing Stripe against an alternative is objection_handling (acknowledge, ask what matters,
+    never disparage) with Connect payouts adjacent; the skill's method asks before asserting, so a first
+    move that only asks is right, and the sourced facts it then cites come from the three tools the skill
+    names.
+
+- id: ss-tap-to-pay-fee
+  split: test
+  customer: seed:C025
+  message: >-
+    We're thinking about selling tickets at the door with Tap to Pay on our staff's phones. What's
+    the fee per tap?
+  skills: {required: [pricing_conversation], acceptable: [terminal]}
+  tools: {required: [get_pricing], acceptable: []}
+  first_action: [skill:pricing_conversation]
+  note: >-
+    Names Terminal's Tap to Pay but asks only a cost, so pricing_conversation by its trigger with
+    terminal adjacent; the card-present rate and the Tap to Pay fee come only from get_pricing.
+
+- id: ss-fare-fixed-fee
+  split: dev
+  customer: seed:C027
+  message: >-
+    Most of our fares are $2.50, so a 30-cent fixed fee eats more than a tenth of every ride. Can
+    you do something about the per-transaction fee for us?
+  skills: {required: [pricing_conversation], acceptable: [objection_handling]}
+  tools: {required: [request_handoff], acceptable: [get_my_profile, get_pricing]}
+  first_action: [skill:pricing_conversation]
+  note: >-
+    A different fee structure is custom pricing, which the agent never promises; at $22.5M a year
+    the handoff goes to Enterprise Sales; the fee complaint is a mild "too expensive" pushback, so
+    objection_handling is adjacent.
+
+- id: ss-dutch-belgian-methods
+  split: test
+  customer: seed:C005
+  message: >-
+    Lots of our shoppers in the Netherlands and Belgium drop off right at the payment step. Can we
+    let them pay the way they normally do over there?
+  skills: {required: [payments], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile, request_handoff]}
+  first_action: [skill:payments]
+  note: >-
+    Local payment methods for conversion (iDEAL, Bancontact), never named, are payments, and
+    method availability must be cited rather than recalled; the regional-availability policy lets a
+    careful agent offer Solutions Engineering for country validation.
+
+- id: ss-donors-bank-account
+  split: dev
+  customer: seed:C007
+  message: >-
+    Donors keep asking if they can give straight from their bank account instead of using a card.
+    Can we offer that on our donation page?
+  skills: {required: [payments], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_pricing, get_my_profile]}
+  first_action: [skill:payments]
+  note: >-
+    Bank debits on their Payment Links page are payment-method coverage, so payments, with the
+    setup cited; ACH's lower fee matters to a low-cost donation collector, so a price lookup is no
+    error.
+
+- id: ss-elements-pci-scope
+  split: test
+  customer: seed:C003
+  message: >-
+    We're replacing Checkout with Elements so the payment form sits inside our own app. Our auditor
+    wants to know whether card numbers would then touch our servers, and which PCI self-assessment
+    questionnaire we'd be filling in.
+  skills: {required: [security_compliance], acceptable: [payments]}
+  tools: {required: [search_knowledge], acceptable: [request_handoff]}
+  first_action: [skill:security_compliance]
+  note: >-
+    Names Checkout and Elements but asks about PCI scope, so security_compliance with payments
+    adjacent; the self-assessment is their own, not a Stripe document, so it is answered from cited
+    docs and a security-team offer is optional.
+
+- id: ss-register-30-states
+  split: dev
+  customer: seed:C002
+  message: >-
+    We now sell our software to businesses in about 30 US states. Do we need to register for sales
+    tax in all of them?
+  skills: {required: [tax], acceptable: []}
+  tools: {required: [request_handoff], acceptable: [search_knowledge, remember]}
+  first_action: [skill:tax]
+  note: >-
+    "Do we need to register" is tax by its trigger, but whether they are liable is tax advice, so
+    the agent describes threshold monitoring and proposes the Tax Specialist.
+
+- id: ss-singapore-stores-zh
+  split: test
+  customer: seed:C029
+  message: >-
+    我们计划明年在新加坡开两家线下门店，想用 Stripe 的读卡器收款。门店的交易能和我们线上的订单、客户数据在同一个后台里统一查看吗？
+  skills: {required: [terminal], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [get_my_profile, remember]}
+  first_action: [skill:terminal]
+  note: >-
+    In Chinese, in-person readers with one view of online and in-store sales is terminal (unified
+    reporting), answered in Chinese from cited docs; two Singapore stores next year is a dated plan,
+    remembered like the other dated plans in the set.

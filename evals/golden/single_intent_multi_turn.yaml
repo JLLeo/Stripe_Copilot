@@ -1,0 +1,450 @@
+# Golden Set — single intent, multi-turn (#17).
+# One new ask, decided against a fixed earlier conversation: at most one required skill, and never one the
+# prior Working Memory already loaded. Several turns are follow-ups inside an area already in context and need no new
+# skill at all. See evals/golden.py for the schema.
+
+- id: sm-bot-then-bakery
+  split: dev
+  customer: prospect
+  working_memory:
+  - customer: Before anything else, am I talking to a real person or a bot?
+    skills: []
+    agent: >-
+      I'm an AI assistant for Stripe's sales team. I can answer questions about Stripe and bring in a
+      person whenever you'd like. What are you working on?
+  message: >-
+    Fair enough, a bot it is. We run three bakeries in Pittsburgh and want people to preorder cakes
+    online and pick them up in store. Where would we even start?
+  skills: {required: [discovery], acceptable: [payments]}
+  tools: {required: [capture_lead], acceptable: [ask_customer]}
+  first_action: [skill:discovery]
+  note: >-
+    The opener was a conduct question that loaded nothing, so this is the prospect's first business
+    turn and needs discovery; online preorders touch payments lightly, and three bakeries wanting
+    preorders are concrete lead facts.
+
+- id: sm-applepay-on-top
+  split: test
+  customer: seed:C022
+  working_memory:
+  - customer: A lot of shoppers drop off at our payment step on their phones. What can we do about that?
+    skills: [payments]
+    agent: >-
+      Turning on wallets is usually the quickest win. Checkout supports Apple Pay, Google Pay and Link,
+      so mobile shoppers can pay without typing their card details.
+  - customer: >-
+      Would that work with the Checkout page we already have, or do we need to rebuild it?
+    skills: []
+    agent: >-
+      It works with the page you have. Wallets are switched on in your payment method settings in
+      the Dashboard, so there's nothing to rebuild.
+  message: If we switch Apple Pay on, does it cost us anything on top of what we pay for cards now?
+  skills: {required: [pricing_conversation], acceptable: []}
+  tools: {required: [get_pricing], acceptable: []}
+  first_action: [skill:pricing_conversation]
+  note: >-
+    Names Apple Pay, a payments topic already in context, but asks what it costs, so
+    pricing_conversation, and the answer comes only from get_pricing.
+
+- id: sm-designers-take-a-cut
+  split: dev
+  customer: seed:C030
+  working_memory:
+  - customer: >-
+      We launch a store for our digital planners next week and have no developers. What's the fastest
+      way to start charging?
+    skills: [payments]
+    agent: >-
+      Payment Links is the fastest route. Create a link for each planner in the Dashboard and share it
+      or add it as a buy button, no code needed; you can move to Checkout later if you want more control.
+  - customer: >-
+      Can buyers pay with Apple Pay through those links?
+    skills: []
+    agent: >-
+      Yes. Payment Links shows Apple Pay and Google Pay automatically on devices that support them,
+      along with cards and Link.
+  message: >-
+    Some outside designers now want to sell their own planners in our store, and we'd keep 20% of
+    each sale. Can those links handle paying them their share?
+  skills: {required: [connect], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [remember]}
+  first_action: [skill:connect]
+  note: >-
+    Mentions the payment links already discussed, but paying outside designers their share after a
+    20% cut is a marketplace flow, so connect, with the split-payment facts cited; the new commission
+    model is worth remembering.
+
+- id: sm-zh-saas-overseas-tax
+  split: dev
+  customer: prospect
+  working_memory:
+  - customer: 你好，我们是台北的一家 SaaS 公司，做餐厅排班软件，正在评估 Stripe。
+    skills: [discovery]
+    agent: 你好！为了给你推荐合适的方案，想先了解一下：你们现在怎么向客户收费，客户主要在哪些国家？
+  message: 按月订阅，大概 800 家餐厅客户，一半在台湾，另一半在美国和英国。这些海外客户的销售税和增值税，Stripe 能自动帮我们算吗？
+  skills: {required: [tax], acceptable: [billing]}
+  tools: {required: [capture_lead, search_knowledge], acceptable: []}
+  first_action: [skill:tax]
+  note: >-
+    Answers the discovery questions with concrete lead facts and asks whether Stripe Tax can calculate
+    US sales tax and UK VAT, a capability to look up and cite; the monthly subscriptions make billing
+    adjacent, and the reply is in Chinese.
+
+- id: sm-taco-truck-window
+  split: dev
+  customer: prospect
+  working_memory:
+  - customer: Hi, I run a taco truck in Austin and do some catering on the side. First time looking at Stripe.
+    skills: [discovery]
+    agent: >-
+      Welcome! So I can point you to the right setup, where do most of your sales happen today, at the
+      truck window, at catering events or online, and roughly how many orders a day?
+  message: >-
+    Mostly at the window, about 150 orders a day at festivals and lunch spots. Can we take cards there
+    without buying a big register system?
+  skills: {required: [terminal], acceptable: []}
+  tools: {required: [capture_lead, search_knowledge], acceptable: [get_pricing]}
+  first_action: [skill:terminal]
+  note: >-
+    Taking cards at a truck window is in-person payments without Terminal being named; the order
+    volume is a lead fact, and the lightweight reader or Tap to Pay options must be cited.
+
+- id: sm-donors-monthly-gift
+  split: test
+  customer: seed:C007
+  working_memory:
+  - customer: We collect donations with a single Payment Link right now. Is that the cheapest way to do it?
+    skills: [payments, pricing_conversation]
+    agent: >-
+      Payment Links adds no fee of its own, so each donation costs only the standard processing rate.
+      Bank debits such as ACH cost less per gift than cards if your donors are open to them.
+  message: >-
+    Good to know. Lots of donors ask whether they could turn that into a monthly gift and cancel it
+    themselves later. Can they?
+  skills: {required: [billing], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [skill:billing]
+  note: >-
+    A recurring gift the donor manages is a subscription with the customer portal, so billing without
+    the word being said; payments and pricing_conversation are in context, and the capability needs a
+    citation.
+
+- id: sm-branded-checkout-no-code
+  split: test
+  customer: seed:C004
+  working_memory:
+  - customer: Can creators offer a free first month on their memberships?
+    skills: [billing]
+    agent: >-
+      Yes. Subscriptions support free trials that convert to paid automatically when they end, and a
+      creator can set the trial length per membership.
+  message: >-
+    Nice. Creators keep complaining that the payment page they send fans to looks generic, though. Can
+    they make it match their own brand without touching code?
+  skills: {required: [payments], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [skill:payments]
+  note: >-
+    Branding the payment page without code is a Checkout question, so payments, even though the
+    conversation is about memberships and billing is already in context.
+
+- id: sm-spikes-into-bigquery
+  split: dev
+  customer: seed:C014
+  working_memory:
+  - customer: >-
+      Every time we launch a new character pack we get a spike of stolen-card purchases. How can Stripe
+      help?
+    skills: [fraud_protection]
+    agent: >-
+      Radar scores every payment for fraud risk in real time, and Radar for Fraud Teams lets you add
+      your own rules, such as blocking or requesting 3D Secure for risky purchases during a launch.
+  - customer: >-
+      What does Radar for Fraud Teams cost?
+    skills: [pricing_conversation]
+    agent: >-
+      On standard pricing, Radar for Fraud Teams is $0.02 per screened transaction, and standard
+      Radar stays included at no extra cost.
+  message: >-
+    Our data team wants to study those spikes themselves. Can every purchase land in our BigQuery so
+    they can join it with in-game events?
+  skills: {required: [data], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [skill:data]
+  note: >-
+    Landing purchases in their own warehouse to join with game events is Data Pipeline, so data;
+    fraud_protection is already in context even though the spikes are the subject.
+
+- id: sm-patient-invoices-hipaa
+  split: test
+  customer: seed:C006
+  working_memory:
+  - customer: Can the agencies we bill pay our invoices by bank transfer and have them matched automatically?
+    skills: [billing]
+    agent: >-
+      Yes. Invoicing accepts bank transfers on the hosted invoice page and reconciles incoming transfers
+      to the right invoice automatically, so your team isn't matching them by hand.
+  message: Good. Some of those invoices reference patient services, though. Is Stripe HIPAA compliant?
+  skills: {required: [security_compliance], acceptable: []}
+  tools: {required: [request_handoff], acceptable: [search_knowledge]}
+  first_action: [skill:security_compliance]
+  note: >-
+    HIPAA is a security_compliance question whose approved wording hands off to Security & Compliance;
+    billing is in context.
+
+- id: sm-dunning-tool-rant
+  split: test
+  customer: seed:C002
+  working_memory:
+  - customer: We lose a lot of renewals to expired cards. What can Stripe do about it?
+    skills: [billing]
+    agent: >-
+      Smart Retries reattempt failed renewals when they're most likely to succeed, and dunning emails
+      plus the Customer Portal let customers update an expired card before the subscription lapses.
+  - customer: >-
+      How much of that lost revenue do companies like us usually get back?
+    skills: []
+    agent: >-
+      It varies a lot by business, so I won't put a number on it. Your own recovery rate in the
+      Dashboard today is the best baseline to compare against.
+  message: >-
+    Look, I'll be honest with you. We signed up for a separate dunning tool about two years ago after a
+    rough quarter, it does its own retries and emails, support knows it inside out, finance built their
+    dashboards on top of it, and every time someone suggests moving it I hear about how long the last
+    migration took. So I'm not convinced switching that over to Stripe is worth the hassle, even if
+    Smart Retries is as good as you say.
+  skills: {required: [objection_handling], acceptable: []}
+  tools: {required: [], acceptable: [remember, search_knowledge]}
+  first_action: [skill:objection_handling]
+  note: >-
+    A long pushback against switching from an existing tool is objection_handling, with billing already
+    in context; the method asks before asserting, so no tool is required, and remembering the standing
+    objection or citing a fact are both fair.
+
+- id: sm-waive-instant-fee
+  split: dev
+  customer: seed:C024
+  working_memory:
+  - customer: Our contractors hate waiting for the weekly payout run. Can they get paid faster?
+    skills: [connect]
+    agent: >-
+      Yes. Instant Payouts lets contractors cash out to an eligible debit card or bank account within
+      minutes, on top of the regular schedule, and you can offer it to all of them or only some.
+  - customer: >-
+      Would that work for our contractors in New Zealand as well as Australia?
+    skills: []
+    agent: >-
+      Instant Payouts is offered in a set list of countries, so I'll confirm New Zealand against the
+      documentation rather than guess.
+  message: >-
+    Across about 4,000 contractors that instant payout fee would add up quickly. Could you waive it for
+    us?
+  skills: {required: [pricing_conversation], acceptable: []}
+  tools: {required: [request_handoff], acceptable: [get_pricing]}
+  first_action: [skill:pricing_conversation]
+  note: >-
+    Asking to waive the Instant Payouts fee just discussed is a custom-pricing request, so
+    pricing_conversation and a Deal Desk / Pricing handoff; get_pricing for the public fee is a fair
+    extra.
+
+- id: sm-es-tarjetas-robadas
+  split: test
+  customer: prospect
+  working_memory:
+  - customer: Hola, tenemos una tienda online de ropa en Madrid y estamos pensando en pasarnos a Stripe.
+    skills: [discovery]
+    agent: >-
+      ¡Encantado! Para recomendaros lo que mejor encaja, ¿cuántos pedidos procesáis al mes y qué es lo
+      que no os funciona con el proveedor actual?
+  message: >-
+    Unos 2.000 pedidos al mes. Lo peor es que cada vez que sacamos una colección nueva nos entran
+    decenas de pedidos con tarjetas robadas, y cuando nos damos cuenta ya los hemos enviado.
+  skills: {required: [fraud_protection], acceptable: []}
+  tools: {required: [capture_lead], acceptable: [search_knowledge]}
+  first_action: [skill:fraud_protection]
+  note: >-
+    Orders on stolen cards that ship before anyone notices is fraud, so fraud_protection without Radar
+    being named; volume and pain are lead facts, nothing is asked yet so a search is optional, and the
+    reply is in Spanish.
+
+- id: sm-correction-we-pay-shops
+  split: dev
+  customer: seed:C010
+  working_memory:
+  - customer: We need a better way to take payments on our website. What would you recommend?
+    skills: [payments]
+    agent: >-
+      For a fast, conversion-friendly setup I'd start with Checkout, a Stripe-hosted payment page with
+      cards, wallets and Link built in. If you want the form inside your own pages, Elements gives you
+      full control.
+  message: >-
+    Sorry, I should have been clearer. We don't sell anything ourselves; local shops list their
+    products on our site, and we pay each shop weekly after taking our fee.
+  skills: {required: [connect], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [skill:connect]
+  note: >-
+    A correction that turns the business into a marketplace paying out shops, so connect without it
+    being named; payments is already in context.
+
+- id: sm-pause-ends
+  split: test
+  customer: seed:C009
+  working_memory:
+  - customer: Can members pause their subscription instead of cancelling?
+    skills: [billing]
+    agent: >-
+      Yes. Billing can pause payment collection on a subscription and resume it later, so you can offer
+      a pause as an alternative to cancelling.
+  - customer: >-
+      Can members do that themselves, without emailing support?
+    skills: []
+    agent: >-
+      Yes. The Customer Portal lets members manage their own subscription, and you choose which
+      actions it offers them.
+  message: >-
+    Great, we'll offer pauses to every member starting in March. When a pause ends, does billing restart
+    on its own, or does the member have to do something?
+  skills: {required: [], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: [remember]}
+  first_action: [tool:search_knowledge, tool:remember]
+  note: >-
+    How a pause resumes is billing, already in context, so no new skill; the behaviour must be cited,
+    and offering pauses to everyone from March is a durable decision to remember.
+
+- id: sm-trade-counter-save-card
+  split: dev
+  customer: seed:C018
+  working_memory:
+  - customer: Can our trade customers pay their monthly invoices online by card?
+    skills: [billing]
+    agent: >-
+      Yes. Every invoice gets a hosted payment page where trade customers can pay by card or bank
+      transfer, and you can charge a saved payment method automatically if they prefer.
+  - customer: >-
+      We're also opening a trade counter at our Chicago warehouse. Can we take cards there with the same
+      Stripe account?
+    skills: [terminal]
+    agent: >-
+      Yes. A Terminal reader at the counter takes cards and wallets into the same Stripe account and
+      Dashboard as your online invoices, so you see every customer in one place.
+  - customer: Which reader would suit a busy counter?
+    skills: []
+    agent: >-
+      A smart reader with a screen, such as the S700, suits a fixed counter. It shows line items and
+      totals to the customer, and it can sit on the counter all day.
+  message: >-
+    Some trade customers come back every week. Could the counter save their card so we can charge it
+    for later orders without them being there?
+  skills: {required: [], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [tool:search_knowledge]
+  note: >-
+    Saving a card at the point of sale is a terminal follow-up with terminal in context, so no new
+    skill; the capability needs a citation.
+
+- id: sm-caregiver-verification-time
+  split: test
+  customer: seed:C017
+  working_memory:
+  - customer: >-
+      We onboard home caregivers who get paid through our platform. Can their ID checks be part of the
+      same onboarding flow?
+    skills: [connect]
+    agent: >-
+      Yes. Connect onboarding verifies each caregiver's identity and bank details, and embedded
+      components let you put that flow inside your own app. Stripe Identity can add document and selfie
+      checks where you need more.
+  - customer: >-
+      Could caregivers be paid the same day they finish a shift?
+    skills: []
+    agent: >-
+      Yes. Instant Payouts lets a verified caregiver cash out to an eligible debit card within
+      minutes, alongside your regular payout schedule.
+  message: How long does that verification usually take before a new caregiver can be paid for their first shift?
+  skills: {required: [], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [tool:search_knowledge]
+  note: >-
+    Verification timing is a follow-up inside connect, already in context, so no new skill; the answer
+    is a documented fact to cite, not a guess.
+
+- id: sm-candles-monthly-cost
+  split: test
+  customer: prospect
+  working_memory:
+  - customer: What do you charge per card payment?
+    skills: [discovery, pricing_conversation]
+    agent: >-
+      Standard online card pricing is 2.9% + 30¢ per successful domestic card charge, with no setup or
+      monthly fees. So I can point you to the right setup, what do you sell and roughly how many orders
+      a month?
+  message: >-
+    Handmade candles, about 400 orders a month at around $28 each, all US customers. So what would that
+    come to each month?
+  skills: {required: [], acceptable: []}
+  tools: {required: [capture_lead], acceptable: [get_pricing]}
+  first_action: [tool:capture_lead]
+  note: >-
+    Arithmetic on the public rate already quoted needs no new skill, as discovery and
+    pricing_conversation are in context; the product, volume and order value are lead facts.
+
+- id: sm-backtest-rule
+  split: dev
+  customer: seed:C001
+  working_memory:
+  - customer: New buyer accounts keep placing big electronics orders with stolen cards. What can we do?
+    skills: [fraud_protection]
+    agent: >-
+      Radar scores every payment for fraud risk, and with Radar for Fraud Teams you can write your own
+      rules, for example sending large first orders from new accounts to manual review or 3D Secure.
+  message: Could we test a rule like that against last month's orders before switching it on?
+  skills: {required: [], acceptable: []}
+  tools: {required: [search_knowledge], acceptable: []}
+  first_action: [tool:search_knowledge]
+  note: >-
+    Back-testing a rule is a fraud_protection follow-up already in context, so no new skill; the
+    capability needs a citation.
+
+- id: sm-walk-our-team-through
+  split: dev
+  customer: seed:C011
+  working_memory:
+  - customer: Our hosts are in about 30 countries. Can Stripe pay them out in their local currencies?
+    skills: [connect]
+    agent: >-
+      Connect supports payouts to hosts in many countries and currencies, and Global Payouts can reach
+      recipients who don't need a full account. Which countries matter most?
+  - customer: Mostly the EU and the UK, then Turkey, Morocco and Brazil, plus a handful elsewhere.
+    skills: []
+    agent: >-
+      Thanks. A payout setup across that many countries is worth reviewing market by market, since some
+      countries carry extra compliance checks.
+  message: >-
+    Agreed. Rather than more chat, can someone from your team walk our finance and legal people through
+    it on a call?
+  skills: {required: [], acceptable: []}
+  tools: {required: [request_handoff], acceptable: []}
+  first_action: [handoff]
+  note: >-
+    A request for a person with nothing new to advise on needs no skill; proposing request_handoff
+    (Enterprise Sales at $21M) is the whole job.
+
+- id: sm-offtopic-product-names
+  split: test
+  customer: seed:C005
+  working_memory:
+  - customer: We sell to customers all over Canada. Can Stripe work out GST and HST per province for us?
+    skills: [tax]
+    agent: >-
+      Yes. Stripe Tax calculates GST, HST and provincial sales tax from each customer's location and your
+      product tax codes, and alerts you as you approach registration thresholds.
+  message: >-
+    Perfect, thanks. Totally unrelated, but could you suggest a few names for the winter product line
+    we're launching?
+  skills: {required: [], acceptable: []}
+  tools: {required: [], acceptable: []}
+  first_action: [answer]
+  note: >-
+    Naming a product line is outside Stripe, so the agent declines briefly and offers to return to
+    Stripe topics, with no skill and no tool.

@@ -151,11 +151,11 @@ def actions_of(completion: Completion) -> list[str]:
             except (TypeError, ValueError):
                 out.append("skill:?")
         else:
-            out.append(_NAMED_ACTIONS.get(call.name, "tool:" + call.name))
+            out.append(NAMED_ACTIONS.get(call.name, "tool:" + call.name))
     return out
 
 
-_NAMED_ACTIONS = {"ask_customer": "clarify", "request_handoff": "handoff"}  # the tools the spec names as actions
+NAMED_ACTIONS = {"ask_customer": "clarify", "request_handoff": "handoff"}  # the tools the spec names as actions
 
 
 def _main_records(recorder: Recorder, since: int, main_model: str) -> list[Record]:
