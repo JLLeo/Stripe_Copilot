@@ -44,7 +44,12 @@ CREATE TABLE IF NOT EXISTS turn_metrics (
     subagent_completion_tokens INTEGER DEFAULT 0,
     latency_ms         INTEGER DEFAULT 0,
     error              TEXT,
-    kind               TEXT DEFAULT 'turn'
+    kind               TEXT DEFAULT 'turn',
+    decider_ms         INTEGER DEFAULT 0,
+    primed_skills_json TEXT DEFAULT '[]',
+    priming_skipped    TEXT,
+    redundant_skill_calls  INTEGER DEFAULT 0,
+    skill_paired_with_tool INTEGER DEFAULT 0
 )
 """
 _INDEXES = (
@@ -103,6 +108,12 @@ class TurnRecord:
     latency_ms: int = 0
     error: str | None = None
     kind: str = "turn"  # turn | session_end (a reflection pass: sub-agent tokens only, no main-model call)
+    # Priming (#14). Off: skipped is "priming_off" and the rest stay at their defaults.
+    decider_ms: int = 0
+    primed_skills: list[str] = field(default_factory=list)  # most probable first
+    priming_skipped: str | None = None  # why nothing was primed; None when something was, or on a resumed turn
+    redundant_skill_calls: int = 0  # Skill calls answered "already in context"
+    skill_paired_with_tool: bool = False  # the first response loaded a skill and called a tool it informs
 
 
 def record_turn(record: TurnRecord) -> None:
@@ -116,8 +127,9 @@ def record_turn(record: TurnRecord) -> None:
                 prompt_tokens, completion_tokens, reasoning_tokens,
                 cache_hit_tokens, cache_miss_tokens, provider_calls,
                 tool_rounds, tools_json, skills_json, hooks_json, cache_hits,
-                subagent_calls, subagent_prompt_tokens, subagent_completion_tokens, latency_ms, error, kind
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                subagent_calls, subagent_prompt_tokens, subagent_completion_tokens, latency_ms, error, kind,
+                decider_ms, primed_skills_json, priming_skipped, redundant_skill_calls, skill_paired_with_tool
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.turn_id, record.session_id, record.customer_id,
@@ -128,6 +140,8 @@ def record_turn(record: TurnRecord) -> None:
                 json.dumps(record.hook_outcomes), record.cache_hits,
                 record.subagent_calls, record.subagent_prompt_tokens, record.subagent_completion_tokens,
                 record.latency_ms, record.error, record.kind,
+                record.decider_ms, json.dumps(record.primed_skills), record.priming_skipped,
+                record.redundant_skill_calls, int(record.skill_paired_with_tool),
             ),
         )
         conn.commit()
@@ -161,7 +175,13 @@ def summary(days: int = 7) -> dict[str, Any]:
             SUM(cache_hits)                            AS tool_cache_hits,
             AVG(CASE WHEN kind = 'turn' THEN provider_calls END)   AS avg_provider_calls,
             SUM(subagent_calls)                        AS subagent_calls,
-            SUM(subagent_prompt_tokens + subagent_completion_tokens) AS subagent_tokens
+            SUM(subagent_prompt_tokens + subagent_completion_tokens) AS subagent_tokens,
+            SUM(CASE WHEN kind = 'turn' AND primed_skills_json != '[]' THEN 1 ELSE 0 END) AS primed_turns,
+            -- Turns Priming ran for: not with it off, not a turn resumed after a handoff answer (NULL).
+            SUM(CASE WHEN kind = 'turn' AND (primed_skills_json != '[]' OR priming_skipped != 'priming_off')
+                THEN 1 ELSE 0 END)                     AS priming_turns,
+            SUM(redundant_skill_calls)                 AS redundant_skill_calls,
+            SUM(CASE WHEN kind = 'turn' THEN skill_paired_with_tool ELSE 0 END) AS skill_paired_turns
         FROM turn_metrics
         WHERE created_at >= ?
         """,
@@ -169,8 +189,9 @@ def summary(days: int = 7) -> dict[str, Any]:
     ).fetchone()
     hit = row["cache_hit_tokens"] or 0
     miss = row["cache_miss_tokens"] or 0
+    turns = row["turns"] or 0
     return {
-        "turns": row["turns"] or 0,
+        "turns": turns,
         "reflections": row["reflections"] or 0,
         "errors": row["errors"] or 0,
         "avg_latency_ms": round(row["avg_latency_ms"] or 0.0, 1),
@@ -186,10 +207,28 @@ def summary(days: int = 7) -> dict[str, Any]:
         "avg_provider_calls": round(row["avg_provider_calls"] or 0.0, 2),
         "subagent_calls": row["subagent_calls"] or 0,
         "subagent_tokens": row["subagent_tokens"] or 0,
+        "primed_turns": row["primed_turns"] or 0,
+        "priming_share": (row["primed_turns"] or 0) / row["priming_turns"] if row["priming_turns"] else 0.0,
+        "priming_skip_reasons": _priming_skip_reasons(since),
+        "redundant_skill_calls": row["redundant_skill_calls"] or 0,
+        "skill_paired_turns": row["skill_paired_turns"] or 0,
         "handoffs_confirmed": count_handoffs(since, "confirmed"),
         "handoffs_declined": count_handoffs(since, "declined"),
         "leads_captured": count_leads(since),
     }
+
+
+def _priming_skip_reasons(since: str) -> dict[str, int]:
+    """Why turns went unprimed, most common first — leaving out turns with Priming off, which are not a miss."""
+    rows = get_connection().execute(
+        """
+        SELECT priming_skipped, COUNT(*) AS n FROM turn_metrics
+        WHERE created_at >= ? AND kind = 'turn' AND priming_skipped IS NOT NULL AND priming_skipped != 'priming_off'
+        GROUP BY priming_skipped ORDER BY n DESC, priming_skipped
+        """,
+        (since,),
+    ).fetchall()
+    return {r["priming_skipped"]: r["n"] for r in rows}
 
 
 def tool_usage(days: int = 7) -> dict[str, int]:

@@ -292,11 +292,14 @@ def test_identical_tool_call_is_served_from_the_session_cache(client, provider):
     assert first_turn == 1  # first turn: two identical calls, the second was a hit
 
 
-def test_skill_loads_are_never_cached(client, provider):
+def test_a_second_skill_load_is_answered_from_context_never_from_the_cache(client, provider):
     provider.script(calls(("Skill", {"name": "tax"})), calls(("Skill", {"name": "tax"})), "ok")
     _chat(client, "s1", "hi")
-    assert _metrics_row("s1")["cache_hits"] == 0
-    assert json.loads(_metrics_row("s1")["skills_json"]) == ["tax", "tax"]
+    row = _metrics_row("s1")
+    assert row["cache_hits"] == 0, "a skill body is in the conversation or not; the tool cache has no say"
+    assert json.loads(row["skills_json"]) == ["tax"] and row["redundant_skill_calls"] == 1
+    second = provider.requests[2].messages[-1]
+    assert second["role"] == "tool" and second["content"].startswith("Already in context")
 
 
 # =========================================================================

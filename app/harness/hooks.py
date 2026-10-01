@@ -68,6 +68,8 @@ class TurnState:
     tools_exhausted: bool = False  # set by turn_budget once it has denied a call this turn
     result_chars: int = 0  # tool-result characters admitted this turn, kept by turn_result_budget
     sources: list[dict[str, str]] = field(default_factory=list)  # collected by source_extraction for the reply
+    skills_in_context: set[str] = field(default_factory=set)  # skills whose bodies the conversation holds, kept current through the turn
+    redundant_skill_calls: int = 0  # Skill calls for a body already in context, counted by skill_already_in_context
 
 
 @dataclass(frozen=True)

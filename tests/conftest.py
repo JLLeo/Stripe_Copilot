@@ -3,8 +3,9 @@ Shared pytest configuration and fixtures.
 
 Every run gets its own runtime database, so tests never write to
 data/runtime.db and never touch the tracked seed database. No test talks to a
-model: the app always starts with a harness over a ScriptedProvider, and tests
-that script replies get their own via the `client` / `provider` fixtures.
+model: the app always starts with a harness over a ScriptedProvider and a
+ScriptedDecider, and tests that script replies or decisions get their own via
+the `client` / `provider` / `decider` fixtures.
 """
 
 import json
@@ -51,9 +52,10 @@ def _scripted_default_harness(_isolated_runtime_db):
     """The app never builds the production provider under test."""
     from app import main
     from app.harness.core import Harness
+    from app.harness.decider import ScriptedDecider
     from app.harness.scripted import ScriptedProvider
 
-    main.app.state.harness = Harness.build(provider=ScriptedProvider())
+    main.app.state.harness = Harness.build(provider=ScriptedProvider(), decider=ScriptedDecider())
     yield
     main.app.state.harness = None
 
@@ -69,6 +71,14 @@ def provider():
 
 
 @pytest.fixture
+def decider():
+    """The Decider the `client` harness asks; script it like `provider`. Asked only when Priming is on."""
+    from app.harness.decider import ScriptedDecider
+
+    return ScriptedDecider()
+
+
+@pytest.fixture
 def harness_config(request):
     """Override per test with `@pytest.mark.parametrize("harness_config", [HarnessConfig(...)], indirect=True)`."""
     from app.harness.core import HarnessConfig
@@ -77,8 +87,8 @@ def harness_config(request):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch, provider, harness_config):
-    """TestClient over the app with a fresh runtime DB and a harness on `provider`."""
+def client(tmp_path, monkeypatch, provider, decider, harness_config):
+    """TestClient over the app with a fresh runtime DB and a harness on `provider` and `decider`."""
     from fastapi.testclient import TestClient
 
     from app import database, main
@@ -87,7 +97,7 @@ def client(tmp_path, monkeypatch, provider, harness_config):
     monkeypatch.setenv("RUNTIME_DB_PATH", str(tmp_path / "runtime.db"))
     database.close_connection()
     previous = main.app.state.harness
-    main.app.state.harness = Harness.build(provider=provider, config=harness_config)
+    main.app.state.harness = Harness.build(provider=provider, config=harness_config, decider=decider)
     with TestClient(main.app) as c:
         yield c
     main.app.state.harness = previous

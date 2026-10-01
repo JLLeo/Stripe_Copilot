@@ -1,8 +1,9 @@
 """
 The harness — one model-driven loop per turn.
 
-A turn: bind the session (SessionStart on first contact), assemble the request
-in the fixed order, stream the model's reply; while the reply asks for tools,
+A turn: bind the session (SessionStart on first contact), prime the skills the
+Decider names when Priming is on (priming.py), assemble the request in the
+fixed order, stream the model's reply; while the reply asks for tools,
 run them through the PreToolUse / PostToolUse hooks and go round again; then
 append everything to working memory and record metrics. The harness decides
 nothing about *what* to do; it builds requests, moves bytes, and keeps the
@@ -22,7 +23,8 @@ from pathlib import Path
 from typing import Any, Generator, Iterator
 
 from app import database
-from app.harness import context, guardrails, prompt
+from app.harness import context, guardrails, priming, prompt
+from app.harness.decider import Decider, build_decider
 from app.harness.hooks import (
     Deny,
     HookEvent,
@@ -45,7 +47,7 @@ from app.harness.provider import (
     ToolCall,
     Usage,
 )
-from app.harness.skills import Skill, load_skills, register_skill_tool, skills_index
+from app.harness.skills import Skill, load_skills, register_skill_tool, skill_paired_with_tool, skills_in_context, skills_index
 from app.harness.subagent import SubagentMetering
 from app.harness.tools import EndTurn, ToolContext, ToolRegistry, ToolResult
 from app.metrics import TurnRecord, record_turn
@@ -120,7 +122,7 @@ class HarnessConfig:
     recent_window_tokens: int = 24_000  # kept verbatim through a compaction
     # Priming (#14). The Decider answers one yes/no question per Skill before the first model call of
     # a turn; what it names is added to the context and nothing is ever taken away from the model.
-    priming: bool = False  # off until the turn is wired to it
+    priming: bool = False  # off until the Golden Set's verdict (#19); HARNESS_PRIMING=1 turns it on
     decider_model: str = "jev-latest"
     decider_timeout_seconds: float = 0.7  # the vendor reports p95 354 ms; past this the turn goes on without it
     priming_threshold: float = 0.55  # provisional: favours recall, because a missed skill costs a whole round
@@ -187,7 +189,7 @@ class Ended:
 class TurnEvent:
     """What the transport layer forwards to the customer's client."""
 
-    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | ask_customer | context_relieved | done | error
+    name: str  # text_delta | thinking | tool_call | tool_result | skill_loaded | hook_blocked | subagent_* | handoff_pending | ask_customer | context_relieved | primed | done | error
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -205,6 +207,7 @@ class _Books:
     subagent_calls: int = 0
     subagent_prompt_tokens: int = 0
     subagent_completion_tokens: int = 0
+    skill_paired_with_tool: bool = False  # the turn's first response loaded a skill and called a tool it informs
 
     def add_subagent(self, metering: SubagentMetering) -> None:
         self.subagent_calls += 1  # one delegation, however many rounds it took
@@ -236,10 +239,14 @@ class Harness:
     tools: ToolRegistry
     skills: dict[str, Skill]
     index: KnowledgeIndex
+    decider: Decider
 
     @classmethod
-    def build(cls, provider: Provider, config: HarnessConfig | None = None) -> "Harness":
-        """Load skills, register tools and guardrails, and render the static prompt once."""
+    def build(cls, provider: Provider, config: HarnessConfig | None = None, decider: Decider | None = None) -> "Harness":
+        """Load skills, register tools and guardrails, and render the static prompt once.
+
+        `decider` is for tests; otherwise the configuration chooses one (`build_decider`).
+        """
         config = config or HarnessConfig.from_env()
         skills = load_skills(config.skills_dir)
 
@@ -255,7 +262,7 @@ class Harness:
         )
 
         tools = ToolRegistry()
-        register_skill_tool(tools, skills)
+        register_skill_tool(tools, hooks, skills)  # after the defaults: turn_budget still sees every call first
         register_all(
             tools, hooks, index, provider=provider, sub_model=config.sub_model,
             subagent_max_rounds=config.subagent_max_rounds, thinking=config.thinking,
@@ -263,11 +270,15 @@ class Harness:
         )
 
         static = prompt.static_system_prompt(database.get_active_policies(), skills_index(skills), team_for=handoff.team_for_policy)
-        return cls(provider=provider, config=config, static_prompt=static, hooks=hooks, tools=tools, skills=skills, index=index)
+        return cls(
+            provider=provider, config=config, static_prompt=static, hooks=hooks, tools=tools, skills=skills, index=index,
+            decider=decider if decider is not None else build_decider(config),
+        )
 
     def close(self) -> None:
-        """Release the knowledge index connection (Milvus Lite holds a file handle)."""
+        """Release the knowledge index connection (Milvus Lite holds a file handle) and the Decider's."""
         self.index.close()
+        self.decider.close()
 
     # ------------------------------------------------------------------
     def run_turn(self, session_id: str, customer_id: str | None, message: str) -> Iterator[TurnEvent]:
@@ -278,7 +289,15 @@ class Harness:
         self._settled_working_memory(session_id)
         relief = context.relieve(session, self.provider, self.config)
         working_memory = database.load_messages(session_id)
-        turn = TurnState(session_id=session_id, customer_id=session["customer_id"], customer_message=message)
+        started = time.perf_counter()  # the customer waits for the Decider too
+        turn = TurnState(
+            session_id=session_id, customer_id=session["customer_id"], customer_message=message,
+            skills_in_context=skills_in_context(working_memory, self.skills),
+        )
+        primed = priming.prime(
+            self.decider, self.config, self.skills, customer_id=session["customer_id"], message=message,
+            working_memory=working_memory, in_context=turn.skills_in_context,
+        )
         # A long message is kept as an Attachment; the model reads it in pieces. Guardrails still
         # see the whole text on the turn.
         user_message = message
@@ -288,7 +307,13 @@ class Harness:
         # Assistant rows carry their reasoning_content on purpose: DeepSeek requires it
         # back whenever `tools` are present (thinking-mode guide).
         messages = prompt.assemble_messages(self.static_prompt, session["customer_block"], working_memory, user_message)
-        yield from self._loop(session, turn, messages, new_messages=[messages[-1]], relief=relief)
+        new_messages = [messages[-1]]
+        if primed.message is not None:
+            # Just before the customer's message, and persisted with it: the next turn's prefix is these same bytes.
+            messages.insert(-1, primed.message)
+            new_messages.insert(0, primed.message)
+            turn.skills_in_context.update(primed.skills)
+        yield from self._loop(session, turn, messages, new_messages=new_messages, relief=relief, primed=primed, started=started)
 
     def resume_turn(self, session_id: str, accept: bool) -> Iterator[TurnEvent]:
         """The customer answered a pending handoff: settle the paused tool call, then let the model go on.
@@ -305,8 +330,11 @@ class Harness:
             raise NothingPending(session_id)
         tool_message = {"role": "tool", "tool_call_id": call_id, "content": result.content}
         database.append_messages(session_id, [tool_message])
-        messages = prompt.assemble_prefix(self.static_prompt, session["customer_block"], database.load_messages(session_id))
-        turn = TurnState(session_id=session_id, customer_id=session["customer_id"])
+        working_memory = database.load_messages(session_id)
+        messages = prompt.assemble_prefix(self.static_prompt, session["customer_block"], working_memory)
+        turn = TurnState(
+            session_id=session_id, customer_id=session["customer_id"], skills_in_context=skills_in_context(working_memory, self.skills),
+        )
         yield from self._loop(session, turn, messages, new_messages=[])
 
     def end_session(self, session_id: str) -> dict[str, Any]:
@@ -365,21 +393,25 @@ class Harness:
 
     def _loop(
         self, session: dict[str, Any], turn: TurnState, messages: list[dict[str, Any]], new_messages: list[dict[str, Any]],
-        relief: "context.Relief | None" = None,
+        relief: "context.Relief | None" = None, primed: "priming.Priming | None" = None, started: float | None = None,
     ) -> Iterator[TurnEvent]:
         """Request → tool rounds → reply. `new_messages` is what this turn appends to working memory."""
         session_id = turn.session_id
         tool_definitions = self.tools.definitions()
         turn_id = turn.turn_id
-        started = time.perf_counter()
+        started = started if started is not None else time.perf_counter()
+        priming_books = primed or priming.Priming()  # a resumed turn answers no customer message: nothing to prime
         books = _Books(model=self.config.main_model)
         announced_thinking = False
         paused: Paused | None = None
         ended: Ended | None = None
         rewrites = 0
+        first_response = True
         if relief is not None and relief.happened:
             books.add_relief(relief)
             yield TurnEvent("context_relieved", {"cleared": relief.cleared, "compacted": relief.compacted, "failed": relief.failed})
+        if primed is not None and self.config.priming:
+            yield TurnEvent("primed", {"skills": list(primed.skills), "skipped": primed.skipped, "decider_ms": primed.decider_ms})
 
         def book(error: str | None = None) -> None:
             record_turn(TurnRecord(
@@ -393,6 +425,10 @@ class Harness:
                 subagent_calls=books.subagent_calls, subagent_prompt_tokens=books.subagent_prompt_tokens,
                 subagent_completion_tokens=books.subagent_completion_tokens,
                 latency_ms=int((time.perf_counter() - started) * 1000), error=error,
+                decider_ms=priming_books.decider_ms, primed_skills=list(priming_books.skills),
+                priming_skipped=priming_books.skipped,
+                redundant_skill_calls=turn.redundant_skill_calls,
+                skill_paired_with_tool=books.skill_paired_with_tool,
             ))
 
         try:
@@ -424,6 +460,9 @@ class Harness:
                     raise RuntimeError("provider stream ended without a completion")
                 books.usage = books.usage + completion.usage
                 books.model = completion.model or books.model
+                if first_response:
+                    books.skill_paired_with_tool = skill_paired_with_tool([c.name for c in completion.tool_calls])
+                    first_response = False
                 if completion.usage.prompt_tokens:
                     database.set_last_prompt_tokens(session_id, completion.usage.prompt_tokens)
 
@@ -576,6 +615,7 @@ class Harness:
 
         if skill := result.meta.get("skill"):
             books.skills_loaded.append(skill)
+            turn.skills_in_context.add(skill)
             yield TurnEvent("skill_loaded", {"call_id": call.id, "name": skill})
         elif isinstance(end := result.meta.get("end_turn"), EndTurn):
             books.outcome("asked_customer" if end.event == "ask_customer" else end.event)

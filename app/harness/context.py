@@ -31,6 +31,7 @@ from typing import Any
 from app import database
 from app.harness.guardrails import INSTRUCTION_TOOLS, cut_at_boundary
 from app.harness.provider import CompletionRequest, Provider, Usage, drain
+from app.harness.skills import primed_names
 
 log = logging.getLogger(__name__)
 
@@ -117,8 +118,16 @@ def relieve(session: dict[str, Any], provider: Provider, config: Any) -> Relief:
 # ---------------------------------------------------------------------------
 # Compaction
 # ---------------------------------------------------------------------------
+def _turn_start(rows: list[dict[str, Any]], i: int) -> bool:
+    """A customer turn begins at its primed message when it has one, otherwise at the customer's message —
+    so a window never keeps a turn while folding away the skill instructions it was answered with."""
+    if primed_names(rows[i]["message"]):
+        return True
+    return rows[i]["role"] == "user" and not (i > 0 and primed_names(rows[i - 1]["message"]))
+
+
 def _window_start(rows: list[dict[str, Any]], budget_chars: int) -> int:
-    """Index of the first row kept verbatim: the largest recent window within budget that starts at a customer message."""
+    """Index of the first row kept verbatim: the largest recent window within budget that starts at a customer turn."""
     start = len(rows)
     total = 0
     for i in range(len(rows) - 1, -1, -1):
@@ -126,24 +135,27 @@ def _window_start(rows: list[dict[str, Any]], budget_chars: int) -> int:
         if total > budget_chars:
             break
         start = i
-    while start < len(rows) and rows[start]["role"] != "user":
+    while start < len(rows) and not _turn_start(rows, start):
         start += 1
     if start >= len(rows):  # even the last exchange is over budget: the current customer turn stays verbatim regardless
-        start = max((i for i, r in enumerate(rows) if r["role"] == "user"), default=0)
+        start = max((i for i in range(len(rows)) if _turn_start(rows, i)), default=0)
     return start
 
 
 def _skills_loaded(rows: list[dict[str, Any]]) -> list[str]:
+    """Every skill these rows brought in, in order: loaded by the model with Skill, or primed by the harness."""
     out: list[str] = []
     for r in rows:
+        names = primed_names(r["message"])
         for call in r["message"].get("tool_calls") or ():
             if call["function"]["name"] == "Skill":
                 try:
-                    name = json.loads(call["function"]["arguments"]).get("name")
+                    names.append(json.loads(call["function"]["arguments"]).get("name"))
                 except (TypeError, ValueError):
-                    name = None
-                if name and name not in out:
-                    out.append(name)
+                    pass
+        for name in names:
+            if name and name not in out:
+                out.append(name)
     return out
 
 

@@ -50,7 +50,7 @@ customer message  ─►  /sales-agent/stream
    POST /sales-agent/end ──► SessionEnd: a reflection sub-agent keeps what the agent did not record
                           │
                           ▼
-   SSE: context_relieved? · thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer)* · text_delta* · done | error
+   SSE: context_relieved? · primed? · thinking? · (tool_call · [subagent_started · subagent_tool_call* · subagent_finished] · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer)* · text_delta* · done | error
 ```
 
 Every request is built in the same order — static system prompt, the eleven tool
@@ -163,7 +163,7 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash)
 | `GET` | `/api/customers` | The sign-in selector: a **New prospect** entry first (`customer_id: null, prospect: true`), then every customer |
 | `GET` | `/api/leads?limit=50` | Leads captured from prospects, most recently updated first — the follow-up queue |
 | `POST` | `/sales-agent/chat` | One turn, JSON reply with `sources`. `404` unknown customer, `409` session already bound to another customer |
-| `POST` | `/sales-agent/stream` | One turn as SSE: `context_relieved`? (spent results cleared / working memory compacted before this turn), `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
+| `POST` | `/sales-agent/stream` | One turn as SSE: `context_relieved`? (spent results cleared / working memory compacted before this turn), `primed`? (with Priming on: the skills put in, or why none), `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
 | `POST` | `/sales-agent/confirm-handoff` | `{session_id, accept, handoff_id?}` — the customer's answer to a pending handoff; the agent's follow-up streams back as SSE. `404` when nothing is pending, `409` for a stale proposal |
 | `POST` | `/sales-agent/end` | `{session_id}` — the customer ends the conversation. `SessionEnd` runs the reflection sub-agent for a customer (never for a prospect) and returns `{reflected, remembered, merged}`; the session takes no more turns (`409`). `404` unknown session, `409` already ended |
 | `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, leads captured, reflection passes, calls per tool |
@@ -194,7 +194,7 @@ session id lives in `localStorage` per customer, so a reload continues the sessi
 ## Testing
 
 ```bash
-pytest            # 169 tests in ~24s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 208 tests in ~27s; no model calls; temp runtime DB and a temp Milvus Lite index
 pytest -m eval    # the evaluation suite: 19 sessions against DeepSeek, ~5 min, needs .env
 ```
 
@@ -206,7 +206,9 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | Test file | Covers |
 |---|---|
 | `tests/test_harness_chat.py` | The turn end to end: fixed order, prefix stability, SessionStart block, prospect sessions, unknown/mismatched customer, SSE incl. `thinking`, friendly failure, disconnect metering, metrics |
-| `tests/test_tools_and_skills.py` | Skill index vs body, Skill → tool → answer, parallel skill loads, profile scoping, catalogue and pricing tools, argument feedback, `turn_budget`, `result_cap`, tool cache, prefix stability with tools, tool metrics, SSE tool events |
+| `tests/test_tools_and_skills.py` | Skill index vs body, Skill → tool → answer, parallel skill loads, a second load answered from context, profile scoping, catalogue and pricing tools, argument feedback, `turn_budget`, `result_cap`, tool cache, prefix stability with tools, tool metrics, SSE tool events |
+| `tests/test_decider.py` | The Decider seam: every question in one request in the documented shape, every failure an answer with a reason and never an exception, no retries, limits checked before sending, the scripted fake, `build_decider` and the Priming settings |
+| `tests/test_priming.py` | Priming: the chosen bodies as one persisted `system` message before the customer's, every branch of the selection rule, threshold and margin from configuration, a body entering a session at most once (with Priming off too), every Decider failure running the turn as before, the prefix byte-identical across primed turns, a primed body never handoff evidence, summariser input or reflection input, compaction keeping a primed message with its turn, the bounded Decider state, the paired-tool metric, the `primed` event and the metrics summary |
 | `tests/test_knowledge_search.py` | A fixture knowledge base indexed through the fake embedder: public-only in both collections, chunking, vocabulary from the graph, one-hop expansion, keyword fallback, filter expression, fused ranking, the `search_knowledge` tool, `sources` on `done` |
 | `tests/test_research.py` | The research sub-agent: its own model and single tool, none of the main conversation in its requests, only the brief in working memory, the round cap and forced brief, cited-only sources, live progress events, separate metering (and none for a cached brief), tool descriptions that steer |
 | `tests/test_handoff.py` | Handoff: the seven Teams and the policy register mapping, unknown team / untraceable evidence denied with feedback, the $10M rule, pause → confirm → `handoffs` row → follow-up, decline without a record, a new message resolving a dangling proposal, other calls in the paused round not run, the policy skills free of internal text |
@@ -273,12 +275,13 @@ leak, and exactly the kind of thing the report exists to show.
 Skills are `skills/<name>/SKILL.md` files — YAML frontmatter (`name`, `description`) and a
 markdown body. The static prompt carries only the descriptions; the body enters the
 conversation when the model calls `Skill(name)`, so the model decides when a skill
-applies. Several can be loaded in one round. Skills recommend tools; they never restrict
+applies — or, with Priming on (`HARNESS_PRIMING=1`, off by default), before its first call,
+when the Decider names it. Either way a body enters a conversation at most once. Several can be loaded in one round. Skills recommend tools; they never restrict
 them. Adding a behaviour is adding a file.
 
 | Tool | What the model gets |
 |---|---|
-| `Skill(name)` | the skill body; one of the seven product skills or `discovery`, `pricing_conversation`, `security_compliance`, `objection_handling` |
+| `Skill(name)` | the skill body (or a short "already in context" note when the conversation has it); one of the seven product skills or `discovery`, `pricing_conversation`, `security_compliance`, `objection_handling` |
 | `get_my_profile()` | the bound customer's profile and products in use — no arguments, so no way to ask about anyone else. In a prospect session: no profile, and a note to ask |
 | `list_products(group?)` | the catalogue from the seed database |
 | `get_pricing(product)` | public list prices for the product, read from the `Price` sections of knowledge-base documents marked `Access Level: public` (the seed database holds no prices); when nothing matches it says so instead of guessing. The documents a price came from are carried as sources, so a quoted price is a cited price |

@@ -41,8 +41,9 @@ _Avoid_: guideline, restriction, rule
 
 **Skill**:
 A markdown instruction file the model loads into its context on demand when a
-conversation calls for it. Skills shape how the model behaves in a situation; they
-do not restrict which tools it may use.
+conversation calls for it — or that Priming puts there first. Its body enters a Session
+at most once. Skills shape how the model behaves in a situation; they do not restrict
+which tools it may use.
 _Avoid_: scenario, intent, skill config
 
 **Decider**:
@@ -58,8 +59,9 @@ every tool stays available, so a wrong or missing answer costs a round, never a 
 _Avoid_: routing, intent classification, pre-selection, injection
 
 **Redundant Skill Call**:
-A request for a Skill whose body is already in the conversation. It costs a round trip and
-tells us Priming was paid for but not used, so it is counted.
+A request for a Skill whose body is already in the conversation — loaded earlier, or primed.
+It is answered with a short note instead of a second copy, and counted: it costs a round
+trip, and after Priming it means the primed body went unused.
 _Avoid_: cache miss, duplicate load
 
 **Sub-agent**:

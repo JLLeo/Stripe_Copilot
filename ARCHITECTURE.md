@@ -21,6 +21,8 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
                                ├─ settle a dangling handoff · relieve pressure (clear, compact) if the last
                                │   response was over the high-water mark ─► SSE context_relieved
                                ├─ a long message ─► attachment; a stub takes its place
+                               ├─ Priming (when on): the Decider names skills ─► their bodies as one
+                               │   system message before the customer's ─► SSE primed
                                ├─ assemble: [static system][customer block][working memory][user] + tools
                                ├─ loop:
                                │   provider.complete(request) ────────────────────────► DeepSeek (stream)
@@ -28,7 +30,7 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
                                │     TextDelta ──► held                                  tool_calls
                                │     Completed ──► usage, tool_calls
                                │   for each tool call:
-                               │     PreToolUse hooks ─► Allow | Deny(feedback) | Replace(cached) | Pause
+                               │     PreToolUse hooks ─► Allow | Deny(feedback) | Replace(cached, already in context) | Pause
                                │     tool.run (worker thread, progress streamed) ─► PostToolUse hooks
                                │     SSE tool_call · skill_loaded | tool_result | hook_blocked | handoff_pending | ask_customer
                                │   until the reply has no tool calls, or a pause / question ends the turn
@@ -45,7 +47,7 @@ POST /sales-agent/end ──► end_session: SessionEnd hooks ─► reflection 
 ### The turn — `core.py`
 
 `Harness.run_turn(session_id, customer_id, message)` is a generator of `TurnEvent`s
-(`context_relieved`, `thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`,
+(`context_relieved`, `primed`, `thinking`, `tool_call`, `skill_loaded`, `tool_result`, `hook_blocked`,
 `subagent_started`, `subagent_tool_call`, `subagent_finished`, `handoff_pending`,
 `ask_customer`, `text_delta`, `done`, `error`). The transport layer forwards them as Server-Sent Events or, for the
 synchronous endpoint, keeps only the last one.
@@ -134,7 +136,11 @@ A skill is a markdown file with YAML frontmatter (`name` must match its director
 file when the harness is built, so a broken skill fails startup, not a conversation.
 The static prompt carries only the index of descriptions; the body reaches the model
 as the result of the `Skill(name)` tool, whose `name` parameter is an enum of the loaded
-skills. Several skills may be loaded in one round. Skills recommend tools in prose and
+skills — or, with Priming on, in one harness-authored `system` message just before the
+customer's message, naming the skills the Decider chose (`priming.py`). Several skills may
+be loaded in one round. A body enters a session at most once: a `Skill` call for a body
+already in the conversation is answered with a short "already in context" note
+(`skill_already_in_context`) and counted as a redundant skill call. Skills recommend tools in prose and
 carry no allowlist — restricting tools by skill would be a router, not a guardrail
 ([ADR 0001](docs/adr/0001-model-decides-guardrails-constrain.md)).
 
@@ -157,7 +163,7 @@ Results are compact JSON — they live in every later request of the session.
 
 | Tool | Source | Notes |
 |---|---|---|
-| `Skill(name)` | `skills/` | not cacheable: a load must always land in the conversation |
+| `Skill(name)` | `skills/` | not cacheable: a body is in the conversation or not, and `skill_already_in_context` answers a second load |
 | `get_my_profile()` | seed `customers` + `customer_product_usage` | no parameters; reads the session's bound customer, so another customer cannot be named |
 | `list_products(group?)` | seed `stripe_products` | name, group, one-line description |
 | `get_pricing(product)` | the `## Price` section of every knowledge-base document whose header says `Access Level: public`, plus the three price sections of the pricing overview | the seed database holds no prices, so the parent spec's "pricing from SQL" became "pricing from Public Knowledge"; documents not marked public are never opened, and when nothing matches the tool says so rather than guessing. `meta.sources` names the documents the prices came from, so `source_extraction` carries them to `done.sources` |
@@ -224,6 +230,7 @@ SessionEnd (see Customer Memory and Reflection).
 | `turn_budget` | PreToolUse | after 8 rounds of tool calls in a turn, every further call is denied and the turn is marked exhausted; the next request carries `tool_choice="none"`, so the model must answer in text. If it still asks for tools, the harness stops the turn with a fixed "here is what I have so far" reply (`hard_stop`) rather than looping on denials |
 | `tool_cache_lookup` | PreToolUse | an identical call (tool + arguments) within the session is replaced by the cached result (TTL 15 min, 50 entries per session, 200 sessions) |
 | `result_cap` | PostToolUse | results over 6,000 characters (~1.5K tokens) are cut at a JSON element, sentence or line boundary with a `[truncated: showing N of M characters]` note |
+| `skill_already_in_context` | PreToolUse | a `Skill` call for a body the conversation already holds — loaded earlier or primed — is replaced by a short "already in context" note, so a body enters a session at most once; counted per turn as `redundant_skill_calls` |
 | `tool_cache_store` | PostToolUse | successful cacheable results enter the cache |
 | `turn_result_budget` | PostToolUse | tool-result characters admitted this turn are counted on the turn; once they reach 24,000 (~6K tokens) further results are cut to what is left, never below 300 characters, with a note. Runs after the cache store, so the cache keeps the capped result rather than this turn's cut; `Skill` bodies are exempt |
 | `source_extraction` | PostToolUse | sources a tool cites (`meta.sources`) are collected on the turn, de-duplicated, and returned in `done.sources` |
@@ -236,7 +243,7 @@ SessionEnd (see Customer Memory and Reflection).
 | `internal_canary` | Stop | a reply containing any marker of Internal Knowledge is sent back. Markers are a curated list ("INTERNAL ONLY", "Discount Ranges", "VP of Sales", …) plus, derived at first use from the non-public documents, their section headings of three words or more and their percentage ranges — minus anything a public document also says (public and internal documents share their section structure, and "buy-rates" or "do not share" appear in public text), so an honest answer is never sent back. `leaks(text)` exposes the same check for tests and evaluation; this is the one place outside ingestion that opens those files, and nothing read is ever sent to a model — it is a blocklist |
 | `clean_question` | PreToolUse | an `ask_customer` question or option that fails the two checks above is denied with feedback — the question is a reply the customer reads |
 
-Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache), `modified` (a PostToolUse hook rewrote the result), `paused`, `asked_customer`, `stop_denied`, `stop_gave_up`, `hard_stop`, and the context relief a turn ran: `cleared` (stubs), `compacted`, `compaction_failed`.
+Metrics record every hook outcome: `allowed`, `denied`, `replaced` (served from cache, or a skill already in context), `modified` (a PostToolUse hook rewrote the result), `paused`, `asked_customer`, `stop_denied`, `stop_gave_up`, `hard_stop`, and the context relief a turn ran: `cleared` (stubs), `compacted`, `compaction_failed`.
 
 ### Context Budget — `context.py`, `app/tools/attachment.py`
 
@@ -430,7 +437,7 @@ its own on `app.state.harness` first.
 |---|---|
 | `POST /sales-agent/chat` | runs a turn, returns the `done`/`error` payload as `ChatResponse` |
 | `POST /sales-agent/end` | `{session_id}` → `Harness.end_session()`; `EndSessionResponse {session_id, reflected, remembered, merged}`; 404 unknown session, 409 already ended. A turn on an ended session is 409 |
-| `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `context_relieved {cleared, compacted, failed}`, `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
+| `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `context_relieved {cleared, compacted, failed}`, `primed {skills, skipped, decider_ms}` (Priming on only), `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
 | `GET /api/customers` | sign-in selector: a `New prospect` entry (`customer_id: null, prospect: true`) first, then every customer with `prospect: false` |
 | `GET /api/leads?limit=N` | leads most recently updated first, `recommended_products` decoded |
 | `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn, handoffs, leads captured, reflection passes; `tool_usage()` — calls per tool |
