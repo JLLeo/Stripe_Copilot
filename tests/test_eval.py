@@ -5,7 +5,9 @@ Excluded by default. Each case is one customer-viewpoint session from
 `evals/cases/`: the agent's first action must match, nothing may leak, and a
 judge on the sub-agent model scores every reply against the case's rubric.
 The report is written to `evals/reports/latest.md` (and `.json`) when the run
-ends and summarised in the terminal.
+ends and summarised in the terminal; `EVAL_REPORT=<name>` writes `<name>.md`
+instead, so a run with other settings (Priming on, another threshold) does not
+replace the one in the repository.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ pytestmark = pytest.mark.eval
 
 CASES = load_cases()
 MIN_JUDGE_SCORE = float(os.environ.get("EVAL_MIN_JUDGE_SCORE", "0"))  # 0: the score is reported, not asserted
+REPORT = os.environ.get("EVAL_REPORT", "latest")
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +50,8 @@ def evaluation(request):
     database.close_connection()
     if results:
         md, _ = runner.write_report(
-            results, runner.REPORTS_DIR / "latest.md", model=config.main_model, judge_model=config.sub_model, defined=len(CASES),
+            results, runner.REPORTS_DIR / f"{REPORT}.md", model=config.main_model, judge_model=config.sub_model,
+            defined=len(CASES), priming=runner.priming_settings(config),
         )
         request.config._eval_summary = (runner.summarise(results, len(CASES)), md)
 

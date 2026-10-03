@@ -567,7 +567,7 @@ accident and this is where a break shows first.
 
 ## Testing
 
-224 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~30 s. The app under test
+242 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~30 s. The app under test
 always starts with a harness over a `ScriptedProvider` and a `ScriptedDecider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys. The 19 evaluation cases carry the `eval`
 marker and are deselected by default (`addopts = -m "not eval"`).
@@ -661,7 +661,63 @@ another did not. `--check` validates the case files and calls no model.
   for the model arms only. There is no ranking metric. A failed call is recorded on its
   `Decision` and counted, not scored. `write_report()` writes
   `evals/reports/golden-<split>.md` and its JSON twin, which hold every decision, every
-  probability and the labels.
+  probability and the labels. `--report <name>` names a subset run's report, so it does not
+  replace a full one.
+
+### Priming's threshold — `evals/thresholds.py`
+
+`python -m evals.thresholds` fits Priming's threshold and margin on the Golden Set's
+development split and publishes them on the held-out split, at `HarnessConfig`'s defaults,
+so the published figures are what runs.
+
+It reads only recorded data:
+- a Decider-only Golden Set run per split, which supplies every probability;
+- the four-arm run, which tells it whether the main model's first response bought nothing
+  (it loaded skills and called nothing a skill informs, #14's "Skill load alone, or with
+  only a local profile read") and how long that round took;
+- `golden-decider-*-before-18.json`, the Decider's answers frozen from before #18 changed
+  its state;
+- the behaviour-case runs written with `EVAL_REPORT`, which record their Priming settings
+  as data.
+
+`fit()` computes everything the report states; `render()` writes `priming-thresholds.md`,
+its JSON and two SVG charts, drawn without a plotting dependency. Every sentence in the
+report that states a conclusion is generated from the numbers.
+
+- **Calibration** pairs each probability with whether its skill was required, leaving out
+  skills that were only acceptable. It gives reliability bins and ECE per skill and pooled.
+  It then compares, by leave-one-case-out log-loss, one log-odds shift shared by every
+  skill against a shift per skill shrunk toward that shared one, so the two models nest.
+  A shared shift changes no ranking, so only a per-skill gain of 5% or more would call for
+  a correction. The fit would then say so and refuse to stand behind its curve; it applies
+  no correction itself. `fit_shift()` caps each Newton step at one unit of log-odds, so a
+  skill whose outcomes all went one way still converges.
+- **The curve.** Each `Rule` is evaluated at every threshold and at each of its margins:
+  the rule before #18, the production rule (`priming.choose`) and a plain top two.
+  `evaluate()` counts:
+  - a saved round, when every required skill was primed on a case whose baseline first
+    round loaded skills only, together with its measured seconds;
+  - wrong primes and the tokens of their bodies;
+  - missed required skills;
+  - the Decider's time, paid on every turn.
+
+  A Decider failure stays in, with nothing primed. `best()` prefers the most rounds saved,
+  then the fewest wrong primes, then the higher threshold, then the smaller margin.
+- **Quality.** `quality()` takes the noise from the runs with Priming off: their spread,
+  floored at one case of first-action accuracy and 0.20 of the judge's mean. A run with
+  Priming on is within noise when neither number falls by more than that, nothing leaked
+  and no case errored. Rounds and turn latency are reported against the same baseline.
+- **The choice.** `operating_point()` returns the curve's best point among the settings
+  whose behaviour run was within noise. The report lists any setting left unrun that
+  would have ranked above it. A test checks that the shipped defaults equal this choice on
+  the committed reports, and the command exits non-zero when they do not.
+
+The behaviour-case runner supports this. `run_case()` reads each turn's row from
+`turn_metrics` (rounds, latency, primed skills, Decider time, redundant `Skill` calls) and
+counts a primed skill as a first action. That makes first-action accuracy a check that the
+right skill got in first; what the model then did is the judge's to say. The report records
+`priming_settings()` (threshold, margin, Decider) as data, and `EVAL_REPORT=<name>` writes
+it under another name.
 
 ## Measured on the live model
 
@@ -678,7 +734,8 @@ judge; September 2026. The README tells each story; the numbers:
 | Context relief with a 12K-token budget | 4 spent results cleared on one turn; a compaction a turn later took the reported 15,395 tokens to an 8,140-token request with 8,064 from cache; "remind me: what was our dispute rate" answered from the summary |
 | Evaluation suite (`evals/reports/latest.md`) | first-action accuracy 19/19, leak-free 19/19, both refusals confirmed, mean judge score 4.5 / 5, 6 min 49 s |
 | Golden Set, skill selection (`evals/reports/golden-dev.md` / `golden-test.md`, October 2026) | exact set and F1: thinking on 92% / 75% and 97% / 89% at p50 3.0 / 2.8 s; thinking off 50% / 52% and 64% / 73% at 1.9 / 1.8 s; `deepseek-flash` 85% / 92% and 94% / 97% at 2.0 / 1.9 s; Decider 70% / 68% and 83% / 85% at 0.20 / 0.18 s |
-| Unit suite | 226 tests, no network, ~30 s; 19 evaluation cases deselected by default |
+| Priming's threshold (`evals/reports/priming-thresholds.md`, held-out split) | shipped 0.55 / 0.20, top two within the margin: exact set 80%, recall 91%, 18 of 22 skill rounds saved, 4 wrong primes; before #18 68%, 79%, 14 of 22. Behaviour cases: tool rounds 41–44 → 25–29 over 25 turns, turn p50 12.7 → 11.3 s, quality within noise |
+| Unit suite | 242 tests, no network, ~30 s; 19 evaluation cases deselected by default |
 
 The knowledge index holds 177 public chunks from 18 documents in two Milvus Lite
 collections (dense + BM25); the three internal documents are never opened past their

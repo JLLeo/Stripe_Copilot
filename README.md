@@ -109,13 +109,15 @@ stripe-sales-copilot/
 ├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 226 tests, no network, ~30s (builds a real Milvus Lite fixture); + 19 eval cases on demand
+├── tests/                    # 242 tests, no network, ~30s (builds a real Milvus Lite fixture); + 19 eval cases on demand
 ├── evals/
 │   ├── cases/*.yaml          # 19 customer-viewpoint sessions: expected first action, expectations, rubric
 │   ├── runner.py             # Recorder over the provider, first-action reading, deepseek-flash judge, zero-leak, report
 │   ├── golden/*.yaml         # the Golden Set: 80 labelled turns in four cells, 40 development / 40 held-out
 │   ├── golden.py             # `python -m evals.golden`: four arms decide which skills each turn needs, scored
-│   └── reports/              # latest.md (the last `pytest -m eval` run), golden-dev.md, golden-test.md, each with a JSON twin
+│   ├── thresholds.py         # `python -m evals.thresholds`: Priming's threshold and margin, fitted on dev, published on held-out
+│   └── reports/              # latest.md (the last `pytest -m eval` run), the Golden Set runs, the behaviour runs behind
+│                             #   the threshold fit, and priming-thresholds.md; each with a JSON twin
 ├── docs/adr/                 # Six architecture decision records
 ├── CONTEXT.md                # Domain glossary
 ├── ARCHITECTURE.md           # How the code implements the decisions, with the measured numbers
@@ -152,7 +154,7 @@ python -m uvicorn app.main:app --reload
 Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash), `HARNESS_MAX_TOKENS`,
 `HARNESS_THINKING=enabled|disabled`, `HARNESS_TOOL_ROUND_BUDGET` (8), `HARNESS_SUBAGENT_MAX_ROUNDS` (3),
 `HARNESS_RESULT_CAP_CHARS` (6000), `HARNESS_TOOL_CACHE_TTL_SECONDS` (900), `HARNESS_MEMORY_LIMIT` (12), `HARNESS_SKILLS_DIR`,
-`MILVUS_URI`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`; and the context thresholds `HARNESS_TURN_RESULT_BUDGET_CHARS` (24000),
+`HARNESS_MILVUS_URI`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`; and the context thresholds `HARNESS_TURN_RESULT_BUDGET_CHARS` (24000),
 `HARNESS_ATTACHMENT_THRESHOLD_CHARS` (8000), `HARNESS_CONTEXT_BUDGET_TOKENS` (96000), `HARNESS_HIGH_WATER` (0.75),
 `HARNESS_LOW_WATER` (0.40), `HARNESS_SUMMARY_MAX_TOKENS` (800), `HARNESS_RECENT_WINDOW_TOKENS` (24000) — see
 "Context management".
@@ -196,7 +198,7 @@ session id lives in `localStorage` per customer, so a reload continues the sessi
 ## Testing
 
 ```bash
-pytest            # 226 tests in ~30s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 242 tests in ~30s; no model calls; temp runtime DB and a temp Milvus Lite index
 pytest -m eval    # the evaluation suite: 19 sessions against DeepSeek, ~5 min, needs .env
 ```
 
@@ -219,8 +221,9 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_prospect.py` | Prospect sessions: the block knows nothing yet and points at discovery, `get_my_profile` reports no profile, the customers list leads with **New prospect**; the `discovery` skill teaches behaviour and quotes no internal text (every skill body passes `leaks()`); `capture_lead` writes one row per session, later calls refine it and return the whole lead, an empty call gets feedback, a signed-in customer is denied (`prospect_only`), a prospect who states $50M is routed to Enterprise Sales; `/api/leads` newest first and `leads_captured` in metrics |
 | `tests/test_clarify_and_stop.py` | `ask_customer` ends the turn with options and the choice is the next message; 2–5 distinct options; a question that would leak or leave blanks is denied with feedback; Stop hook rewrites placeholders and internal leaks before anything streams, gives up after two rewrites with a safe reply, and checks the text beside a handoff proposal; citations, links and sign-offs handled; `leaks()` finds curated and document-derived markers and nothing a public document says |
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape, the request timeout |
-| `tests/test_eval_runner.py` | The evaluation runner on the scripted provider: the case set covers every skill, clarifying questions, both handoff triggers and the enterprise override, prospect discovery and refusal; actions are read off recorded completions and only the main model's count; a case checks first action, within-turn and within-session expectations, the handoff team, a refusal where one is expected, and leaks, and judges every reply; the judge's JSON is found among prose; the summary and the report, incomplete runs and table cells included |
+| `tests/test_eval_runner.py` | The evaluation runner on the scripted provider: the case set covers every skill, clarifying questions, both handoff triggers and the enterprise override, prospect discovery and refusal; actions are read off recorded completions and only the main model's count; a case checks first action, within-turn and within-session expectations, the handoff team, a refusal where one is expected, and leaks, and judges every reply; the judge's JSON is found among prose; each turn's rounds, latency and primed skills, with a primed skill counted as a first action; the summary and the report, incomplete runs and table cells included |
 | `tests/test_eval.py` | `pytest -m eval` — see Evaluation |
+| `tests/test_thresholds.py` | Fitting Priming's threshold: only required and unwanted skills calibrate; reliability and ECE; a log-odds shift fitted toward the truth and shrunk toward zero; a correction only when skills differ from one another; the rule before #18 against the production rule; rounds saved only when every required skill was primed on a skill-only baseline round; the curve and its tie-breaks; quality judged against the noise of two runs with Priming off; published figures from the held-out split at the shipped values |
 | `tests/test_golden.py` | The Golden Set runner on both fakes: the 80 cases in four even cells with every skill required in both splits; a malformed case file reports every problem at once; the two layers and required alternatives; a model arm's skill decision from its first response and its tool decision with the instructions in hand (a follow-up after skill loads or a profile read, which runs for real, while `remember` writes nothing); every model arm on the same bytes; a fixed prior Working Memory with no fabricated tool call; the Decider arm through the production Priming code with every probability kept; abstaining and failing Deciders; micro-averaged numbers per arm and cell; the report and its JSON twin; the command refusing an unknown arm or a Decider without its key |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
 | `tests/test_api_customers.py` | Customer list served through the shared connection |
@@ -233,6 +236,7 @@ Running the suite leaves `git status` clean: the suite uses its own runtime data
 pytest -m eval                       # all 19 cases; writes evals/reports/latest.md and latest.json
 pytest -m eval -k handoff            # a subset
 EVAL_MIN_JUDGE_SCORE=3 pytest -m eval   # also fail a case the judge scores under 3
+EVAL_REPORT=primed HARNESS_PRIMING=1 pytest -m eval   # other settings, written to primed.md so latest.md stays
 ```
 
 The unit suite proves the plumbing; the evaluation suite measures behaviour, on the real
@@ -266,6 +270,18 @@ not just counted; a run of a subset says how many of the defined cases it covere
 numbers are printed at the end of the pytest run. The report in the repository is the
 latest full run; re-running overwrites it, and a changed report belongs in the same commit
 as the behaviour change that caused it.
+
+Each turn's row from the turn metrics goes into the report too. That row records the
+turn's tool rounds, its latency, the skills Priming put in and the Decider's time. The
+report's summary line counts turns, primed turns, tool rounds, turn latency p50/p90 and
+redundant `Skill` calls. A skill that Priming put in counts as a first action: it is the
+load the first response would otherwise have made.
+
+The run in [`evals/reports/latest.md`](evals/reports/latest.md): first-action accuracy
+19/19, leak-free 19/19, both refusals confirmed by the judge, mean judge score 4.5 / 5, in
+under seven minutes. The one flagged case is instructive: the judge marked Billing's public
+0.7% rate as "invented" because the reply did not cite it inline — a judge's reading, not a
+leak, and exactly the kind of thing the report exists to show.
 
 ### The Golden Set
 
@@ -324,7 +340,7 @@ differences under about seven points as noise.
   - the "three or more above the threshold" rule keeps only the top skill;
   - nothing in its state says the customer is a new prospect.
 
-  Both are inputs for #18.
+  #18 dealt with both; see below.
 
 The tool layer is reported, not gated. It scores tools chosen with the instructions in
 hand; reading the profile and remembering a fact are free. Tool recall is 58–73% with
@@ -332,11 +348,70 @@ thinking on, 66–71% for flash, and about 30% with thinking off. The commonest 
 every arm is `search_knowledge` on a turn whose reply needs a cited fact: the model
 answers from the skill body instead.
 
-The run in [`evals/reports/latest.md`](evals/reports/latest.md): first-action accuracy
-19/19, leak-free 19/19, both refusals confirmed by the judge, mean judge score 4.5 / 5, in
-under seven minutes. The one flagged case is instructive: the judge marked Billing's public
-0.7% rate as "invented" because the reply did not cite it inline — a judge's reading, not a
-leak, and exactly the kind of thing the report exists to show.
+### Fitting Priming's threshold
+
+```bash
+python -m evals.golden --split dev --arms decider --report golden-decider-dev     # the Decider's probabilities, per split
+python -m evals.golden --split test --arms decider --report golden-decider-test
+EVAL_REPORT=behaviour-off-a pytest -m eval        # the behaviour cases with Priming off; twice, to measure the noise
+EVAL_REPORT=behaviour-t055 HARNESS_PRIMING=1 HARNESS_PRIMING_THRESHOLD=0.55 HARNESS_PRIMING_MARGIN=0.20 pytest -m eval
+python -m evals.thresholds                        # fits on the development split → evals/reports/priming-thresholds.md
+```
+
+The development run of the Decider was made before the fit, so its own report still shows
+selections at the old margin, 0.15. The fit reads only its probabilities.
+
+Priming's threshold and margin are fitted, not guessed. The fit uses the Golden Set's
+development split and is published on its held-out split, in
+[`priming-thresholds.md`](evals/reports/priming-thresholds.md), with the decision curve
+and a reliability diagram as SVG. Every step reads probabilities the Decider already
+recorded, so trying a rule costs no call.
+
+1. **Calibration.** The Decider is over-confident overall: skills it scores 0.1–0.4
+   are almost never required. Under leave-one-case-out cross-validation, a log-odds shift
+   per skill, shrunk toward one shared shift, predicts held-back cases only 4% better than
+   the shared shift alone. That is short of the 5% that eleven extra parameters on forty
+   cases must earn. A shared shift is the same as moving the threshold, so no per-skill
+   correction is applied.
+2. **The rule.** The rule #16 shipped kept only the top skill when three or more cleared
+   the threshold, and primed nothing when the top one did not lead the third by the
+   margin. On every split, that only lost rounds. Three or more now prime the top two,
+   the second only when it is within the margin of the top.
+3. **The decision curve.** Rounds saved against wrong primes, at every threshold and
+   margin. Thresholds 0.30–0.55 save the same 28 of 31 skill rounds on the development
+   split, with fewer wrong primes the higher they go.
+4. **Quality.** The nineteen behaviour cases ran with Priming off twice, and on at 0.45,
+   0.55 and 0.65.
+   - All three thresholds stayed within the noise of the two runs with Priming off:
+     19/19 first actions in every run, judge means within ±0.26, nothing leaked.
+   - Tool rounds fell from 41–44 to 25–29 across the 25 turns.
+   - Turn p50 fell from 12.7 s to 9.9–11.3 s; the two runs with Priming off differed by
+     0.3 s.
+   - Turn p90 rose by 1.8–3.9 s. The two off runs differed by 3.9 s, so this is within
+     noise, but p90 did not improve, which #14 expected it to.
+   - A skill Priming put in counts as a first action. First-action accuracy therefore
+     says whether the right skill got in first; the judge says what the model did with it.
+
+**Shipped: threshold 0.55, margin 0.20.** Among the settings that kept quality, this one
+saves the most rounds, then has the fewest wrong primes. `operating_point()` computes that
+choice. A test checks that the configuration's defaults are the point it chooses from the
+committed reports, and `python -m evals.thresholds` exits non-zero if they drift apart.
+At 0.55, margins 0.20–0.40 all do equally well, and the smallest primes a second skill
+least often. On the held-out split:
+
+| | Exact set | Recall | Skill rounds saved | Wrong primes | Missed |
+|---|---|---|---|---|---|
+| Shipped | 80% | 91% | 18 of 22 | 4 | 5 |
+| Before #18 | 68% | 79% | 14 of 22 | 4 | 12 |
+
+The state now tells the Decider outright when the customer is a new prospect. That
+raised `discovery`'s probability on prospect turns and saved two more rounds on the
+development split (28 against 26). On the held-out split, the rule alone accounts for
+the gain. `golden-decider-*-before-18.json` freezes the Decider's answers from before
+this change, so the comparison does not depend on rerunning anything.
+
+To run several behaviour runs at once, give each its own copy of `milvus.db` through
+`HARNESS_MILVUS_URI`, because Milvus Lite locks the file.
 
 ## Skills and tools
 

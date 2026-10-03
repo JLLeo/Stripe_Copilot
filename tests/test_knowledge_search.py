@@ -230,3 +230,12 @@ def test_a_search_served_from_the_tool_cache_still_yields_its_sources(client, pr
         "SELECT cache_hits FROM turn_metrics WHERE session_id='s1' ORDER BY rowid DESC LIMIT 1"
     ).fetchone()
     assert row[0] == 1, "the second search was a cache hit, and it still cited its sources"
+
+
+def test_the_index_location_has_its_own_setting(monkeypatch):
+    from app.harness.core import HarnessConfig
+
+    # pymilvus reads MILVUS_URI itself when it is imported and rejects a Milvus Lite file path, so the harness
+    # cannot share that name: setting it to the index's own path would stop the app from starting.
+    monkeypatch.setenv("HARNESS_MILVUS_URI", "elsewhere/knowledge.db")
+    assert HarnessConfig.from_env().milvus_uri == "elsewhere/knowledge.db"

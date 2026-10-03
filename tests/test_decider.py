@@ -239,7 +239,7 @@ def test_the_priming_settings_come_from_the_configuration_object(monkeypatch):
     default = HarnessConfig()
     assert default.priming is False, "off until #16 wires it into the turn"
     assert (default.decider_model, default.decider_timeout_seconds) == ("jev-latest", 0.7)
-    assert (default.priming_threshold, default.priming_margin) == (0.55, 0.15)
+    assert (default.priming_threshold, default.priming_margin) == (0.55, 0.20), "fitted in #18"
 
     monkeypatch.setenv("HARNESS_PRIMING", "true")
     monkeypatch.setenv("HARNESS_DECIDER_MODEL", "jev-preview")

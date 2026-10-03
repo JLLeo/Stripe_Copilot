@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import re
 import sys
@@ -66,7 +65,7 @@ from app.harness.skills import (
     skills_in_context,
 )
 from app.harness.tools import ToolContext
-from evals.runner import NAMED_ACTIONS, REPORTS_DIR, actions_of, resolve_customer
+from evals.runner import NAMED_ACTIONS, REPORTS_DIR, actions_of, percentile, resolve_customer
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 CELLS = ("single_intent_single_turn", "multi_intent_single_turn", "single_intent_multi_turn", "multi_intent_multi_turn")
@@ -443,15 +442,7 @@ def run(
 # ---------------------------------------------------------------------------
 # Aggregation and the report
 # ---------------------------------------------------------------------------
-def percentile(values: list[int], q: float) -> int | None:
-    """Nearest-rank percentile; None for no values."""
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
-
-
-def _layer(scores: list[SetScore]) -> dict[str, float | None]:
+def micro(scores: list[SetScore]) -> dict[str, float | None]:
     """Micro-averaged over the decisions: a decision that chose nothing adds nothing to precision's denominator."""
     chosen, correct = sum(s.chosen for s in scores), sum(s.correct for s in scores)
     required, found = sum(s.required for s in scores), sum(s.found for s in scores)
@@ -470,14 +461,14 @@ def _layer(scores: list[SetScore]) -> dict[str, float | None]:
 def stats(decisions: list[Decision]) -> dict[str, Any]:
     ok = [d for d in decisions if d.error is None]
     out: dict[str, Any] = {"cases": len(decisions), "errors": len(decisions) - len(ok)}
-    out.update(_layer([d.skill_score for d in ok]))
+    out.update(micro([d.skill_score for d in ok]))
     out["first_action"] = sum(d.first_action_ok for d in ok) / len(ok) if ok else None
     out["p50_ms"] = percentile([d.latency_ms for d in ok], 0.5)
     out["p90_ms"] = percentile([d.latency_ms for d in ok], 0.9)
     with_tools = [d for d in ok if d.tool_score is not None]
     if with_tools:
         out["tools"] = {
-            **_layer([d.tool_score for d in with_tools if d.tool_score is not None]),
+            **micro([d.tool_score for d in with_tools if d.tool_score is not None]),
             "paired": sum(1 for d in with_tools if d.paired),
             "p50_ms": percentile([d.tool_latency_ms or 0 for d in with_tools], 0.5),
             "p90_ms": percentile([d.tool_latency_ms or 0 for d in with_tools], 0.9),
@@ -613,6 +604,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--arms", help="comma-separated arm names; default all four")
     parser.add_argument("--limit", type=int, help="the first N cases of the split, for a quick look")
     parser.add_argument("--check", action="store_true", help="validate the case files and exit; no model calls")
+    parser.add_argument("--report", help="the report's name in evals/reports/, default golden-<split>; a subset run should name its own")
     args = parser.parse_args(argv)
 
     # A run starts from an empty runtime database, so no arm sees Customer Memory another did not.
@@ -672,7 +664,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{case.id}: {shown}", flush=True)
 
         decisions = run(cases, arms, harness=harness, decider=decider, progress=progress)
-        md, _ = write_report(decisions, cases, REPORTS_DIR / f"golden-{args.split}.md", split=args.split, arms=arms, config=config)
+        name = args.report or f"golden-{args.split}"
+        md, _ = write_report(decisions, cases, REPORTS_DIR / f"{name}.md", split=args.split, arms=arms, config=config)
         print(f"report: {md}")
         return 0
     finally:

@@ -15,6 +15,7 @@ and on DeepSeek under `pytest -m eval`.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import uuid
@@ -252,6 +253,7 @@ class CaseResult:
     error: str | None = None
     refusal_expected: bool = False
     refused: bool | None = None  # the judge's reading of the last reply, when a refusal was expected
+    turns: list[dict[str, Any]] = field(default_factory=list)  # each turn's row from turn_metrics: rounds, latency, Priming
 
     @property
     def refusal_ok(self) -> bool:
@@ -274,8 +276,26 @@ def customer_note(customer_id: str | None) -> str:
     return f"{profile.get('customer_name', customer_id)} — " + ", ".join(parts)
 
 
+_TURN_FIELDS = ("tool_rounds", "latency_ms", "provider_calls", "decider_ms", "priming_skipped", "redundant_skill_calls")
+
+
+def turn_metrics(turn_id: str) -> dict[str, Any]:
+    """What the harness recorded for one turn: its rounds, its latency, and what Priming did."""
+    row = database.get_connection().execute("SELECT * FROM turn_metrics WHERE turn_id = ?", (turn_id,)).fetchone()
+    if row is None:
+        return {}
+    out = {key: row[key] for key in _TURN_FIELDS}
+    out["primed_skills"] = json.loads(row["primed_skills_json"] or "[]")
+    out["skill_paired_with_tool"] = bool(row["skill_paired_with_tool"])
+    return out
+
+
 def run_case(client: Any, recorder: Recorder, case: Case, *, main_model: str, judge_model: str) -> CaseResult:
-    """Drive one case through `/sales-agent/chat` and measure it."""
+    """Drive one case through `/sales-agent/chat` and measure it.
+
+    A skill Priming put in before the turn's first model call counts among the first actions: it is the
+    load the first response would otherwise have made.
+    """
     session_id = f"eval-{case.id}-{uuid.uuid4().hex[:8]}"
     customer_id = resolve_customer(case.customer)
     replies: list[str] = []
@@ -286,6 +306,7 @@ def run_case(client: Any, recorder: Recorder, case: Case, *, main_model: str, ju
     session_actions: list[str] = []
     pending_team: str | None = None
     error: str | None = None
+    turns: list[dict[str, Any]] = []
     started = time.perf_counter()
     for i, message in enumerate(case.messages):
         since = len(recorder.records)
@@ -302,9 +323,11 @@ def run_case(client: Any, recorder: Recorder, case: Case, *, main_model: str, ju
             error = str(data["error"])
             break  # the turn failed; later messages would only spend calls on a case already lost
         sources.append([s.get("title") or s.get("url") or "" for s in data.get("sources") or []])
-        actions = turn_actions(recorder, since, main_model)
+        turns.append(turn_metrics(data["turn_id"]))
+        primed = [f"skill:{s}" for s in turns[-1].get("primed_skills", [])]
+        actions = primed + turn_actions(recorder, since, main_model)
         if i == 0:
-            first = first_actions(recorder, since, main_model)
+            first = primed + first_actions(recorder, since, main_model)
             first_turn_actions = actions
         session_actions += actions
         proposals.append(data["pending_handoff"].get("team") if data.get("pending_handoff") else None)
@@ -338,17 +361,26 @@ def run_case(client: Any, recorder: Recorder, case: Case, *, main_model: str, ju
         within_ok=within_ok, handoff_ok=handoff_ok, handoff_team=pending_team, leaks=found, leak_free=not found,
         judge_score=(sum(scores) / len(scores)) if scores else None, judge_scores=scores, judge_reason=reason,
         replies=replies, latency_ms=latency_ms, area=case.area, error=error,
-        refusal_expected=case.refusal, refused=refused,
+        refusal_expected=case.refusal, refused=refused, turns=turns,
     )
 
 
 # ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------
+def percentile(values: list[int], q: float) -> int | None:
+    """Nearest-rank percentile; None for no values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
+
+
 def summarise(results: list[CaseResult], defined: int | None = None) -> dict[str, Any]:
     """The headline numbers; `defined` is how many cases exist, so a partial run says so."""
     judged = [r.judge_score for r in results if r.judge_score is not None]
     matched = sum(1 for r in results if r.first_action_ok)
+    turns = [t for r in results for t in r.turns if t]
     return {
         "cases": len(results),
         "cases_defined": defined if defined is not None else len(results),
@@ -359,6 +391,13 @@ def summarise(results: list[CaseResult], defined: int | None = None) -> dict[str
         "judged": len(judged),
         "mean_judge_score": (sum(judged) / len(judged)) if judged else None,
         "errors": sum(1 for r in results if r.error),
+        "turns": len(turns),
+        "primed_turns": sum(1 for t in turns if t["primed_skills"]),
+        "tool_rounds": sum(t["tool_rounds"] for t in turns),
+        "turn_p50_ms": percentile([t["latency_ms"] for t in turns], 0.5),
+        "turn_p90_ms": percentile([t["latency_ms"] for t in turns], 0.9),
+        "redundant_skill_calls": sum(t["redundant_skill_calls"] for t in turns),
+        "paired_turns": sum(1 for t in turns if t["skill_paired_with_tool"]),
     }
 
 
@@ -367,10 +406,18 @@ def _cell(text: str) -> str:
     return " ".join(str(text).replace("|", "\\|").split())
 
 
+def priming_settings(config: Any) -> dict[str, Any] | None:
+    """How Priming was set for a run, as the report records it: None when it was off."""
+    if not config.priming:
+        return None
+    return {"threshold": config.priming_threshold, "margin": config.priming_margin, "decider": config.decider_model}
+
+
 def write_report(
-    results: list[CaseResult], md_path: Path, *, model: str, judge_model: str, defined: int | None = None
+    results: list[CaseResult], md_path: Path, *, model: str, judge_model: str, defined: int | None = None,
+    priming: dict[str, Any] | None = None,
 ) -> tuple[Path, Path]:
-    """Write the markdown report and its JSON twin next to it; returns both paths."""
+    """Write the markdown report and its JSON twin next to it; returns both paths. `priming` is `priming_settings()`."""
     summary = summarise(results, defined)
     md_path.parent.mkdir(parents=True, exist_ok=True)
     mean = summary["mean_judge_score"]
@@ -380,14 +427,20 @@ def write_report(
         "",
         f"Run: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · agent `{model}` · judge `{judge_model}` · {ran}",
         "",
+        "Priming: " + (f"on — threshold {priming['threshold']}, margin {priming['margin']}, Decider {priming['decider']}"
+                       if priming else "off"),
+        "",
         f"- First-action accuracy: {summary['first_action_matched']}/{summary['cases']} ({summary['first_action_accuracy']:.0%})",
         f"- Leak-free replies: {summary['leak_free']}/{summary['cases']} cases",
         f"- Mean judge score: {mean:.1f} / 5 ({summary['judged']} judged)" if mean is not None else "- Mean judge score: n/a",
         f"- Cases passed (first action, session expectations, refusal where expected, no leak): {summary['passed']}/{summary['cases']}",
         f"- Errors: {summary['errors']}",
+        f"- Turns: {summary['turns']}, {summary['primed_turns']} primed; {summary['tool_rounds']} tool rounds; "
+        f"turn latency p50 {(summary['turn_p50_ms'] or 0) / 1000:.1f} s, p90 {(summary['turn_p90_ms'] or 0) / 1000:.1f} s; "
+        f"{summary['redundant_skill_calls']} redundant Skill calls; {summary['paired_turns']} first responses pairing a Skill call with a tool",
         "",
-        "| Case | Area | Expected first | First actions | Match | Within | Handoff | Refused | Judge | Leaks | ms |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Case | Area | Expected first | First actions | Match | Within | Handoff | Refused | Judge | Leaks | Primed | Rounds | ms |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         judge_cell = f"{r.judge_score:.1f}" if r.judge_score is not None else "—"
@@ -398,7 +451,8 @@ def write_report(
             f"| {_cell(r.id)} | {_cell(r.area)} | {_cell(', '.join(r.expected_first))} | {_cell(', '.join(r.first_actions) or '—')} | "
             f"{'✓' if r.first_action_ok else '✗'} | {'✓' if r.within_ok else '✗'} | "
             f"{_cell(r.handoff_team or '—') + ('' if r.handoff_ok else ' ✗')} | {refused_cell} | {judge_cell} | "
-            f"{_cell(', '.join(r.leaks) or '—')} | {r.latency_ms} |"
+            f"{_cell(', '.join(r.leaks) or '—')} | {_cell(' / '.join(', '.join(t.get('primed_skills', [])) or '—' for t in r.turns) or '—')} | "
+            f"{'+'.join(str(t.get('tool_rounds', 0)) for t in r.turns) or '—'} | {r.latency_ms} |"
         )
     lines += ["", "## Replies and judge reasons", ""]
     for r in results:
@@ -411,7 +465,8 @@ def write_report(
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     json_path = md_path.with_suffix(".json")
     json_path.write_text(
-        json.dumps({"summary": summary, "model": model, "judge_model": judge_model, "results": [asdict(r) for r in results]},
+        json.dumps({"summary": summary, "model": model, "judge_model": judge_model, "priming": priming,
+                    "results": [asdict(r) for r in results]},
                    ensure_ascii=False, indent=1),
         encoding="utf-8",
     )

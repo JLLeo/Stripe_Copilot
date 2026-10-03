@@ -12,8 +12,10 @@ import json
 
 import pytest
 
+from app.harness.core import HarnessConfig
 from app.harness.provider import Completion, ToolCall, Usage
 from app.harness.scripted import ScriptedProvider
+from app.harness.skills import load_skills
 from evals import runner
 from evals.runner import Case, Recorder, actions_of, first_actions, judge, load_cases, run_case, summarise, write_report
 
@@ -98,6 +100,8 @@ def test_run_case_checks_first_action_within_turn_handoff_and_leaks(client, prov
     result = run_case(client, provider, case, main_model="deepseek-v4-pro", judge_model="deepseek-flash")
     assert result.first_actions == ["skill:pricing_conversation"] and result.first_action_ok
     assert result.within_ok and result.handoff_ok and result.handoff_team == "Deal Desk / Pricing"
+    (turn,) = result.turns
+    assert turn["tool_rounds"] == 2 and turn["primed_skills"] == [] and turn["priming_skipped"] == "priming_off"
     assert result.leaks == [] and result.leak_free
     assert result.judge_score == 4 and "pricing team" in result.judge_reason
     assert len(result.replies) == 1 and result.latency_ms >= 0
@@ -113,6 +117,18 @@ def test_run_case_flags_a_wrong_first_action(client, provider):
     assert result.first_actions == ["answer"] and not result.first_action_ok and not result.passed
     assert result.leak_free and result.judge_score == 2
     assert len(provider.records) == 1, "the judge's call is not recorded as agent traffic"
+
+
+@pytest.mark.parametrize("harness_config", [HarnessConfig(priming=True)], indirect=True)
+def test_a_primed_skill_counts_as_the_turn_s_first_action(client, provider, decider):
+    decider.script({name: (0.9 if name == "payments" else 0.05) for name in load_skills(HarnessConfig().skills_dir)})
+    provider.inner.script("Checkout supports Apple Pay.", Completion(content='{"score": 5, "reason": "right"}'))
+    case = Case(id="wallets", customer="small", messages=["Apple Pay?"], first_action=["skill:payments"], rubric="Says yes.")
+    result = run_case(client, provider, case, main_model="deepseek-v4-pro", judge_model="deepseek-flash")
+    assert result.first_actions == ["skill:payments", "answer"] and result.first_action_ok, \
+        "Priming made the load the first response would otherwise have made"
+    (turn,) = result.turns
+    assert turn["primed_skills"] == ["payments"] and turn["tool_rounds"] == 0 and turn["decider_ms"] >= 0
 
 
 def test_the_zero_leak_check_names_internal_markers_and_placeholders():
@@ -171,7 +187,8 @@ def test_summary_and_report(tmp_path):
     results = [
         runner.CaseResult(id="a", expected_first=["skill:payments"], first_actions=["skill:payments"], first_action_ok=True,
                           within_ok=True, handoff_ok=True, handoff_team=None, leaks=[], leak_free=True,
-                          judge_score=4.0, judge_scores=[4], judge_reason="good", replies=["r"], latency_ms=1200),
+                          judge_score=4.0, judge_scores=[4], judge_reason="good", replies=["r"], latency_ms=1200,
+                          turns=[_turn(1200, 1, ["payments"]), _turn(3000, 2, [], redundant=1)]),
         runner.CaseResult(id="b", expected_first=["clarify"], first_actions=["answer"], first_action_ok=False,
                           within_ok=True, handoff_ok=True, handoff_team=None, leaks=[], leak_free=True,
                           judge_score=None, judge_scores=[], judge_reason="judge failed", replies=["r"], latency_ms=800),
@@ -184,9 +201,15 @@ def test_summary_and_report(tmp_path):
     assert summary["cases"] == 3 and summary["first_action_matched"] == 2 and summary["first_action_accuracy"] == pytest.approx(2 / 3)
     assert summary["leak_free"] == 2 and summary["judged"] == 2 and summary["mean_judge_score"] == pytest.approx(3.0)
     assert summary["passed"] == 1, "a case passes when its first action matched, its conversation expectations held, and nothing leaked"
+    assert (summary["turns"], summary["primed_turns"], summary["tool_rounds"]) == (2, 1, 3)
+    assert (summary["turn_p50_ms"], summary["turn_p90_ms"], summary["redundant_skill_calls"]) == (1200, 3000, 1)
 
-    md, js = write_report(results, tmp_path / "latest.md", model="deepseek-v4-pro", judge_model="deepseek-flash", defined=5)
+    settings = runner.priming_settings(HarnessConfig(priming=True))
+    assert settings == {"threshold": 0.55, "margin": 0.20, "decider": "jev-latest"} and runner.priming_settings(HarnessConfig()) is None
+    md, js = write_report(results, tmp_path / "latest.md", model="deepseek-v4-pro", judge_model="deepseek-flash", defined=5,
+                          priming=settings)
     text = md.read_text(encoding="utf-8")
+    assert "Priming: on — threshold 0.55, margin 0.2, Decider jev-latest" in text and "| payments / — | 1+2 |" in text
     assert "3 of 5 cases" in text, "a partial run says so"
     assert "First-action accuracy: 2/3" in text and "Mean judge score: 3.0" in text and "| a |" in text and "INTERNAL ONLY" in text
     assert "2.0 ⚠" in text and "| ✗ | 2.0 ⚠" in text, "a low judge score and a missing refusal are visible in the table"
@@ -195,5 +218,13 @@ def test_summary_and_report(tmp_path):
                               judge_score=None, judge_scores=[], judge_reason="", replies=[], latency_ms=0)
     row = [l for l in write_report([piped], tmp_path / "p.md", model="m", judge_model="j")[0].read_text(encoding="utf-8").splitlines() if l.startswith("| d |")][0]
     unescaped = [i for i, ch in enumerate(row) if ch == "|" and (i == 0 or row[i - 1] != "\\")]
-    assert len(unescaped) == 12 and "a \\| b c" in row, "cells never break the table"
-    assert json.loads(js.read_text(encoding="utf-8"))["summary"]["cases"] == 3
+    assert len(unescaped) == 14 and "a \\| b c" in row, "cells never break the table"
+    data = json.loads(js.read_text(encoding="utf-8"))
+    assert data["summary"]["cases"] == 3 and data["priming"] == settings, "kept as data, so a reader never parses prose"
+    assert "Priming: off" in write_report([piped], tmp_path / "off.md", model="m", judge_model="j")[0].read_text(encoding="utf-8")
+
+
+def _turn(latency_ms, rounds, primed, redundant=0):
+    return {"tool_rounds": rounds, "latency_ms": latency_ms, "provider_calls": rounds + 1, "decider_ms": 0,
+            "priming_skipped": None if primed else "below_threshold", "redundant_skill_calls": redundant,
+            "primed_skills": primed, "skill_paired_with_tool": False}

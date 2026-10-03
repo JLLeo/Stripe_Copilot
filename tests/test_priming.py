@@ -129,14 +129,19 @@ def test_priming_never_narrows_what_the_model_may_do(client, provider, decider):
 # =========================================================================
 # The selection rule
 # =========================================================================
-@primed
-def test_the_selection_rule_takes_one_or_two_and_reads_three_or_more_with_care(client, provider, decider):
+@pytest.mark.parametrize("harness_config", [HarnessConfig(priming=True, priming_threshold=0.55, priming_margin=0.15)], indirect=True)
+def test_the_selection_rule_takes_one_or_two_and_the_top_two_within_the_margin(client, provider, decider):
     cases = [
         ("none above the threshold", _probabilities(payments=0.40, billing=0.30), [], "below_threshold"),
         ("one above", _probabilities(payments=0.90), ["payments"], None),
         ("two above, most probable first", _probabilities(billing=0.80, payments=0.90), ["payments", "billing"], None),
-        ("three above, the top one well ahead", _probabilities(fraud_protection=0.95, terminal=0.70, payments=0.60), ["fraud_protection"], None),
-        ("three above, flat", _probabilities(fraud_protection=0.70, terminal=0.65, payments=0.60), [], "flat"),
+        ("three above, the second far behind", _probabilities(fraud_protection=0.95, terminal=0.70, payments=0.60), ["fraud_protection"], None),
+        ("three above, the second close: a turn asking for two things",
+         _probabilities(fraud_protection=0.92, terminal=0.89, payments=0.60), ["fraud_protection", "terminal"], None),
+        ("three above, all close: still the top two, never nothing",
+         _probabilities(fraud_protection=0.70, terminal=0.65, payments=0.60), ["fraud_protection", "terminal"], None),
+        ("three above, the second exactly the margin behind, which floating point makes 0.15000000000000002",
+         _probabilities(fraud_protection=0.85, terminal=0.70, payments=0.60), ["fraud_protection", "terminal"], None),
     ]
     for i, (label, answer, expected, skipped) in enumerate(cases):
         decider.script(answer)
@@ -159,14 +164,15 @@ def test_the_selection_rule_takes_one_or_two_and_reads_three_or_more_with_care(c
 
 @pytest.mark.parametrize("harness_config", [HarnessConfig(priming=True, priming_threshold=0.45, priming_margin=0.40)], indirect=True)
 def test_the_threshold_and_margin_come_from_the_configuration(client, provider, decider):
-    # Under the defaults (0.55, 0.15) the first would prime nothing and the second would prime fraud_protection.
+    # At 0.55 / 0.15 the first would prime nothing and the second only fraud_protection.
     decider.script(_probabilities(payments=0.50), _probabilities(fraud_protection=0.95, terminal=0.70, payments=0.60))
     provider.script("ok", "ok")
     _chat(client, "s1", "q")
     _chat(client, "s2", "q")
     assert SKILLS["payments"].body in _primed_message(provider.requests[0])["content"], "0.50 clears a 0.45 threshold"
-    assert _primed_message(provider.requests[1]) is None, "a 0.35 lead is short of a 0.40 margin"
-    assert _metrics("s2")["priming_skipped"] == "flat"
+    second = _primed_message(provider.requests[1])["content"]
+    assert SKILLS["terminal"].body in second, "0.25 behind the top is within a 0.40 margin"
+    assert json.loads(_metrics("s2")["primed_skills_json"]) == ["fraud_protection", "terminal"]
 
 
 # =========================================================================
@@ -400,7 +406,7 @@ def test_the_decider_state_is_bounded_and_carries_what_the_spec_names(client, pr
     assert first["customer"]["annual_payment_volume"] == profile["annual_payment_volume"]
     assert isinstance(first["customer"]["products_in_use"], list)
     assert first["remembered"] == [f"preference: Preference {i}" for i in (4, 3, 2)], "the most recent Customer Memory, bounded"
-    assert first["previous_agent_reply"] == "" and first["skills_in_context"] == []
+    assert first["previous_agent_reply"] == "" and first["skills_in_context"] == [] and first["new_prospect"] is False
 
     assert len(second["customer_message"]) <= 4000, "a long message is cut for the Decider; the model still gets it all"
     assert second["previous_agent_reply"].startswith("A first reply.") and len(second["previous_agent_reply"]) <= 500
@@ -413,6 +419,7 @@ def test_a_prospect_s_state_has_no_customer(client, provider, decider):
     provider.script("ok")
     _chat(client, "p1", "We are thinking about Stripe.")
     (state, _), = decider.requests
+    assert state["new_prospect"] is True, "the Decider is told outright, as the model's customer block tells it"
     assert state["customer"] is None and state["remembered"] == []
 
 

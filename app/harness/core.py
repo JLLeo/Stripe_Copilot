@@ -125,8 +125,9 @@ class HarnessConfig:
     priming: bool = False  # off until the Golden Set's verdict (#19); HARNESS_PRIMING=1 turns it on
     decider_model: str = "jev-latest"
     decider_timeout_seconds: float = 0.7  # the vendor reports p95 354 ms; past this the turn goes on without it
-    priming_threshold: float = 0.55  # provisional: favours recall, because a missed skill costs a whole round
-    priming_margin: float = 0.15  # provisional: how far the top skill must lead the third before a flat answer is used
+    # Fitted in #18 on the Golden Set's development split, checked on the behaviour cases (evals/reports/priming-thresholds.md).
+    priming_threshold: float = 0.55
+    priming_margin: float = 0.20  # with three or more above the threshold, how far below the top the second may be
 
     def __post_init__(self) -> None:
         if not 0 < self.low_water < self.high_water <= 1:
@@ -150,7 +151,8 @@ class HarnessConfig:
             tool_round_budget=int(os.environ.get("HARNESS_TOOL_ROUND_BUDGET", cls.tool_round_budget)),
             result_cap_chars=int(os.environ.get("HARNESS_RESULT_CAP_CHARS", cls.result_cap_chars)),
             tool_cache_ttl_seconds=float(os.environ.get("HARNESS_TOOL_CACHE_TTL_SECONDS", cls.tool_cache_ttl_seconds)),
-            milvus_uri=os.environ.get("MILVUS_URI", cls.milvus_uri),
+            # Not MILVUS_URI: pymilvus reads that name itself at import and rejects a Milvus Lite file path.
+            milvus_uri=os.environ.get("HARNESS_MILVUS_URI", cls.milvus_uri),
             sub_model=os.environ.get("HARNESS_SUB_MODEL", cls.sub_model),
             subagent_max_rounds=int(os.environ.get("HARNESS_SUBAGENT_MAX_ROUNDS", cls.subagent_max_rounds)),
             memory_limit=int(os.environ.get("HARNESS_MEMORY_LIMIT", cls.memory_limit)),

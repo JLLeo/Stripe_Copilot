@@ -1,0 +1,952 @@
+{
+ "summary": {
+  "cases": 19,
+  "cases_defined": 19,
+  "passed": 19,
+  "first_action_matched": 19,
+  "first_action_accuracy": 1.0,
+  "leak_free": 19,
+  "judged": 19,
+  "mean_judge_score": 4.578947368421052,
+  "errors": 0,
+  "turns": 25,
+  "primed_turns": 19,
+  "tool_rounds": 28,
+  "turn_p50_ms": 11311,
+  "turn_p90_ms": 27005,
+  "redundant_skill_calls": 0,
+  "paired_turns": 0
+ },
+ "model": "deepseek-v4-pro",
+ "judge_model": "deepseek-flash",
+ "priming": {
+  "threshold": 0.55,
+  "margin": 0.2,
+  "decider": "jev-latest"
+ },
+ "results": [
+  {
+   "id": "payments_wallets",
+   "expected_first": [
+    "skill:payments",
+    "tool:search_knowledge"
+   ],
+   "first_actions": [
+    "skill:payments",
+    "tool:search_knowledge"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply correctly confirms Checkout supports Apple Pay and Google Pay, explains they're enabled via Dashboard payment-method settings, and notes Stripe handles Apple Pay domain verification, all with sources and no invented limits or fees.",
+   "replies": [
+    "Yes — Checkout supports both Apple Pay and Google Pay out of the box, and for your setup there's essentially nothing to build.\n\n- **Apple Pay** shows up automatically for customers on Safari/iOS; **Google Pay** on Chrome/Android.\n- With Checkout and **Dynamic payment methods**, Stripe automatically displays the wallet each customer can actually use, based on their device and location — no code change needed.\n- You just confirm the methods are enabled in your Dashboard under **Settings → Payment methods**. If they're on, you're done. Stripe also handles the Apple Pay domain verification on its hosted checkout page, so there's nothing extra to configure there.\n\nGiven your focus on fast checkout and conversion, these two are worth having on: they cut the form-filling out entirely for shoppers who already have a card in their wallet. Want me to walk through how to confirm they're turned on in the Dashboard?"
+   ],
+   "latency_ms": 11943,
+   "area": "payments",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 11935,
+     "provider_calls": 2,
+     "decider_ms": 158,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "payments"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "billing_usage_based",
+   "expected_first": [
+    "skill:billing"
+   ],
+   "first_actions": [
+    "skill:billing",
+    "tool:search_knowledge"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.5,
+   "judge_scores": [
+    5,
+    4
+   ],
+   "judge_reason": "The reply correctly explains metered pricing with monthly invoicing and names the relevant capabilities (subscriptions, metered prices, usage records, invoices), citing Stripe Billing documentation, but it introduces an unsourced factual claim that Stripe does not natively support a percentage-of-usage fee, which costs a point for sourcing.",
+   "replies": [
+    "How do you expect to count usage for your API?",
+    "That's a natural fit for Billing. Monthly in arrears is exactly how metered pricing works: usage accrues during the billing cycle, and Stripe generates and charges the invoice at the end of the month. On one subscription you can stack two prices — a flat recurring platform fee plus a metered price for API usage (per call, per event, etc.). Your gateway just needs to POST usage records to Stripe as it emits events; Stripe handles the rest (invoice math, payment collection, retries, and the customer's self-service portal).\n\nOne thing I want to get right so the setup matches: is your \"platform fee\" a flat monthly amount, or a percentage of the customer's usage?\n\n- **Flat monthly fee** → that's a standard recurring price, no extra work.\n- **Percentage of usage** → Stripe doesn't apply a %-of-usage fee natively; you'd typically compute it on your side and report it as part of the metered amount, or model it in the unit price. Worth a quick look if that's the case.\n\nWhich one is it?"
+   ],
+   "latency_ms": 34845,
+   "area": "billing",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 2,
+     "latency_ms": 11245,
+     "provider_calls": 2,
+     "decider_ms": 158,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "billing"
+     ],
+     "skill_paired_with_tool": false
+    },
+    {
+     "tool_rounds": 0,
+     "latency_ms": 23588,
+     "provider_calls": 1,
+     "decider_ms": 167,
+     "priming_skipped": "below_threshold",
+     "redundant_skill_calls": 0,
+     "primed_skills": [],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "connect_marketplace",
+   "expected_first": [
+    "skill:connect"
+   ],
+   "first_actions": [
+    "skill:connect",
+    "skill:payments",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Solutions Engineering",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.5,
+   "judge_scores": [
+    4,
+    5
+   ],
+   "judge_reason": "The reply recommends Connect with Express accounts, explains connected accounts and KYC, covers the 10% application fee per transaction and configurable weekly payouts, cites documentation, avoids quoting non-public pricing by deferring to Solutions Engineering, and asks the right clarifying question up front.",
+   "replies": [
+    "Who do you want to handle seller onboarding and support?",
+    "Thanks — that helps a lot. Given a few hundred individual and small-business sellers, here's my recommendation:\n\n**Connect with Express accounts.** Express is the right fit for you because:\n- **Stripe hosts the seller onboarding** — sellers click a link, enter their details, and Stripe handles KYC/KYB verification. You don't build that yourself.\n- **You keep a light support footprint** and minimal engineering, which matches your no-code setup.\n- **Weekly payouts are configurable** per seller in the Dashboard, and your 10% cut is taken automatically as an application fee on each charge (separate from any processing markup you might add later).\n\nOn **Canada**: Connect does support paying out to connected accounts internationally, and Canadian sellers onboard and verify the same way. That said, I couldn't pull the Canada-specific cross-border payout fees or any extra eligibility steps from the public docs, and Connect pricing is model-specific (arranged by our sales team) rather than a public rate card. Since a US platform paying out to Canadian sellers is exactly the kind of cross-border payout flow that shouldn't be guessed at, I'd rather have a solutions engineer confirm the details before you build."
+   ],
+   "latency_ms": 53498,
+   "area": "connect",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 2,
+     "latency_ms": 21561,
+     "provider_calls": 2,
+     "decider_ms": 175,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "connect",
+      "payments"
+     ],
+     "skill_paired_with_tool": false
+    },
+    {
+     "tool_rounds": 3,
+     "latency_ms": 31919,
+     "provider_calls": 3,
+     "decider_ms": 154,
+     "priming_skipped": "below_threshold",
+     "redundant_skill_calls": 0,
+     "primed_skills": [],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "tax_cross_border",
+   "expected_first": [
+    "skill:tax"
+   ],
+   "first_actions": [
+    "skill:tax",
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5,
+    5
+   ],
+   "judge_reason": "Clearly explains Stripe Tax calculation and threshold monitoring for Canada/EU physical goods, cites documentation, flags that registration requirements and duties are outside its scope without giving tax advice, and asks the right clarifying question about existing registrations.",
+   "replies": [
+    "Yes — Stripe Tax can handle both of those for you, and it works right on the Checkout and Link payments you already take.\n\nHere's what it does in your situation:\n\n- **Canada** — calculates GST/HST plus the applicable provincial sales taxes, based on where your buyer is and what you're selling.\n- **EU** — calculates VAT at the correct member-state rate for each transaction.\n- It keys off **product tax codes** (physical goods vs. digital vs. services), the **customer's location**, and your **registrations** — so the right amount is added at checkout.\n- It also **monitors registration thresholds** and alerts you if your sales into a country or state are approaching the point where registration is typically required.\n\nOne important line: I can explain how the product works and what it would apply to, but I can't tell you whether you're *required* to register in Canada or the EU, or how to treat any specific transaction — that's tax advice, and I'd connect you with a tax specialist for that.\n\nTo point you at the right setup: do you sell physical goods, digital products, or a mix — and are you already registered for sales tax or VAT anywhere today?",
+    "Got it — furniture is a physical good, so in Stripe Tax you'd tag it with the physical-goods tax code and it will calculate the correct amount based on each buyer's location and your registrations.\n\nA few things to be clear about for cross-border physical goods specifically:\n\n- **Canada**: Stripe Tax calculates the destination-based GST/HST and applicable provincial tax when you're registered there.\n- **EU**: Stripe Tax calculates the correct member-state VAT rate when you're registered in the relevant country (or using the appropriate one-stop-shop scheme).\n- **Threshold monitoring** runs in the background and alerts you as your Canadian or EU sales approach the point where registration is typically needed — so you're not caught off guard.\n\nTwo honest caveats:\n\n1. **Import duties and customs** at the border (when goods physically enter Canada or the EU) are a separate customs/brokerage matter — Stripe Tax handles the tax calculated on the transaction, not duty collection at customs.\n2. Whether you're *required* to register in Canada or the EU, and which scheme applies to you, is tax advice I can't give. I can connect you with a tax specialist for that part.\n\nTo make sure I point you at the right setup: are you already registered for sales tax/VAT in any Canadian provinces or EU countries today?"
+   ],
+   "latency_ms": 28295,
+   "area": "tax",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 0,
+     "latency_ms": 14513,
+     "provider_calls": 1,
+     "decider_ms": 201,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "tax"
+     ],
+     "skill_paired_with_tool": false
+    },
+    {
+     "tool_rounds": 1,
+     "latency_ms": 13767,
+     "provider_calls": 2,
+     "decider_ms": 166,
+     "priming_skipped": "below_threshold",
+     "redundant_skill_calls": 0,
+     "primed_skills": [],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "fraud_chargebacks",
+   "expected_first": [
+    "skill:fraud_protection"
+   ],
+   "first_actions": [
+    "skill:fraud_protection",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.0,
+   "judge_scores": [
+    4,
+    4
+   ],
+   "judge_reason": "The reply accurately addresses the dispute mix and recommends Radar, selective 3D Secure and Smart Disputes tied to the 2% rate and friendly fraud, but it skips paid Radar for Fraud Teams and custom rules (which the rubric asks for) and cites several irrelevant sources.",
+   "replies": [
+    "What kind of chargebacks are you mostly seeing?",
+    "That mix needs two different plays, because they work at different stages.\n\n**Stolen cards → stop them at checkout.** Radar's already scoring your Checkout payments for free. The highest-impact addition here is **selective 3D Secure**: it only challenges payments Radar flags as risky, and once a customer authenticates, the liability for a fraud dispute shifts to their bank instead of you. That directly cuts the stolen-card chargebacks you eat.\n\n**Friendly fraud → defend it after the fact.** A real customer disputing a real order can't be \"blocked\" at checkout, so the win is on the response side:\n\n- **Smart Disputes** — AI that automatically gathers the compelling evidence (delivery confirmation, tracking, order history) and submits the response for you. You only pay when it wins (30% of the disputed amount), so it's no-risk to try.\n- **Statement descriptor** — the single biggest cause of friendly fraud is a customer not recognizing the charge on their card statement. Worth confirming your descriptor clearly matches the store name they know.\n\nSo my concrete recommendation for you, given your no-code setup:\n\n1. Keep **Radar** on (it already is) and turn on **selective 3D Secure** for risky payments.\n2. Switch on **Smart Disputes** to auto-fight the friendly-fraud cases.\n3. Double-check your **statement descriptor** matches what customers expect to see.\n\nI'd skip the paid Radar for Fraud Teams tier for now — it's built for teams writing custom rules and running manual reviews, which doesn't match your setup.\n\nOne thing I want to flag honestly: at 2% of orders, you're above the card networks' typical dispute thresholds, which can lead to monitoring. If you've received any notice about a monitoring program, that's a situation I'd want to route to our risk team rather than give you general advice here. Have you gotten anything like that, or is this purely chargebacks showing up in your Dashboard?"
+   ],
+   "latency_ms": 47772,
+   "area": "fraud_protection",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 2,
+     "latency_ms": 14889,
+     "provider_calls": 2,
+     "decider_ms": 233,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "fraud_protection"
+     ],
+     "skill_paired_with_tool": false
+    },
+    {
+     "tool_rounds": 2,
+     "latency_ms": 32865,
+     "provider_calls": 3,
+     "decider_ms": 173,
+     "priming_skipped": "below_threshold",
+     "redundant_skill_calls": 0,
+     "primed_skills": [],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "terminal_shops",
+   "expected_first": [
+    "skill:terminal"
+   ],
+   "first_actions": [
+    "skill:terminal",
+    "skill:pricing_conversation",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 3.0,
+   "judge_scores": [
+    3
+   ],
+   "judge_reason": "Asking about how staff will take payments is a reasonable clarifying step, but it does not yet name Terminal reader options or pricing as the rubric requires for the exchange.",
+   "replies": [
+    "How will your staff be taking payments in the shops?"
+   ],
+   "latency_ms": 9015,
+   "area": "terminal",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 2,
+     "latency_ms": 9002,
+     "provider_calls": 2,
+     "decider_ms": 205,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "terminal",
+      "pricing_conversation"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "data_reporting",
+   "expected_first": [
+    "skill:data"
+   ],
+   "first_actions": [
+    "skill:data",
+    "tool:search_knowledge"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.0,
+   "judge_scores": [
+    4
+   ],
+   "judge_reason": "Correctly points to Sigma and explains how to build revenue by product line with a sample query and cited docs, but states Sigma pricing without a source (and thus subject to the no-source penalty).",
+   "replies": [
+    "Yes — this is exactly what **Stripe Sigma** is for. It lets your finance team write ANSI SQL directly against your Stripe data (charges, refunds, invoices, etc.) right in the Dashboard, no engineering or data pipeline needed. Sigma is $15/month (from $10/month billed annually).\n\nOne thing worth being precise about: Stripe doesn't know your \"product line\" on its own. It can only group revenue that way if each payment is tagged. In practice that's usually one of:\n\n- **Metadata on the charge/payment** (e.g. `metadata['product_line'] = 'grocery'`), which is the most common fit for a Checkout flow like yours, or\n- **Line items**, if you use Stripe Billing/Invoices with separate Products and Prices.\n\nA representative Sigma query would look like this:\n\n```sql\nselect\n  date_trunc('month', created) as month,\n  metadata['product_line']    as product_line,\n  sum(amount)                 as revenue\nfrom charges\nwhere status = 'succeeded'\ngroup by 1, 2\norder by 1, 2;\n```\n\n(Column names like `metadata` are worth double-checking in Sigma's schema browser, since the exact shape depends on what your integration sends.)\n\nSo my question: how is product line attached to a payment today? Are you already sending it as metadata at checkout, or would you need to start tagging it? That determines whether this is a \"write the query\" task or a small integration change first."
+   ],
+   "latency_ms": 20460,
+   "area": "data",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 2,
+     "latency_ms": 20448,
+     "provider_calls": 3,
+     "decider_ms": 187,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "data"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "pricing_public_rate",
+   "expected_first": [
+    "skill:pricing_conversation",
+    "tool:get_pricing"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:payments",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply correctly states the standard 2.9% + $0.30 rate for domestic card charges, explicitly notes Checkout adds no extra fee, and does not hint at any discount or custom rate.",
+   "replies": [
+    "Checkout itself adds no fee — you just pay the standard card processing rate of **2.9% + $0.30 per successful domestic card charge**. There are two optional add-ons:\n\n- Custom domain: $10/month\n- Post-payment invoices: 0.4% of the transaction (capped at $2 per invoice)\n\nSo on a $41 average order, standard processing comes to about $1.49. International cards and currency conversion carry additional standard charges."
+   ],
+   "latency_ms": 4873,
+   "area": "pricing_conversation",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 4859,
+     "provider_calls": 2,
+     "decider_ms": 182,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "pricing_conversation",
+      "payments"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "clarify_cost",
+   "expected_first": [
+    "clarify",
+    "skill:pricing_conversation",
+    "skill:discovery"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:discovery",
+    "tool:get_pricing",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 3.0,
+   "judge_scores": [
+    4,
+    2
+   ],
+   "judge_reason": "After learning 'online only,' the agent should quote the public online card rate as the rubric specifies, but instead asks another question, withholding the rate it had already given and not moving to the quote.",
+   "replies": [
+    "A good starting point is our standard pricing for accepting online card payments: **2.9% + $0.30 per successful domestic card charge**, with no setup or monthly fees — you only pay when you get paid. A few common add-ons:\n\n- International cards: +1.5%\n- Manually keyed-in cards: +0.5%\n- Currency conversion: +1%\n\nThat's the headline rate for online payments; other products (like subscriptions, invoicing, or in-person payments) have their own pricing, and so do non-card payment methods.\n\nTo give you a number that actually reflects what you'd pay, I need a bit of context: could you tell me how you sell — online store, subscriptions/SaaS, in person, invoices to other businesses — and roughly how much you'd process in a year?",
+    "What do you sell online?"
+   ],
+   "latency_ms": 10540,
+   "area": "clarifying question",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 6901,
+     "provider_calls": 2,
+     "decider_ms": 146,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "pricing_conversation",
+      "discovery"
+     ],
+     "skill_paired_with_tool": false
+    },
+    {
+     "tool_rounds": 1,
+     "latency_ms": 3621,
+     "provider_calls": 1,
+     "decider_ms": 159,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "payments"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "handoff_person",
+   "expected_first": [
+    "handoff",
+    "skill:objection_handling",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "handoff"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Sales Representative",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The agent clearly proposes handing off to the sales representative team, asks for confirmation, and does not pretend to be human or push back on the request.",
+   "replies": [
+    "I can bring in our Sales Representative team for this: You'd like to speak with a human sales rep rather than continue with me. They would pick the conversation up from here. Shall I go ahead?"
+   ],
+   "latency_ms": 2528,
+   "area": "handoff (customer asks)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 2517,
+     "provider_calls": 1,
+     "decider_ms": 150,
+     "priming_skipped": "below_threshold",
+     "redundant_skill_calls": 0,
+     "primed_skills": [],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "handoff_discount",
+   "expected_first": [
+    "skill:pricing_conversation",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:objection_handling",
+    "tool:get_pricing",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Deal Desk / Pricing",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply avoids promising, estimating, or hinting at any custom rate, correctly notes custom pricing exists, and offers a handoff to the pricing team while asking the customer to confirm with relevant qualifying questions, without mentioning thresholds or approval steps.",
+   "replies": [
+    "That's a custom-pricing question, so I can't promise you a rate myself — that decision belongs to Stripe's pricing team. Here's what I can tell you from public pricing:\n\n- Standard card processing is **2.9% + $0.30** per successful domestic card charge, and Payment Links adds no extra fee on top of that.\n- **ACH Direct Debit** runs **0.8% (capped at $5.00)** — much lower than 2.9% — which can be a good fit for donations, especially recurring ones.\n- **Link Instant Bank Payments** is **2.6% + $0.30**, a bit cheaper than cards for bank-based payment.\n\n> Stripe offers custom pricing packages for businesses with significant payment volume or unique business models. This can include volume discounts, interchange-plus pricing, multi-product bundles, and country-specific rates. I'd be happy to connect you with our pricing team to explore what might be available for your specific situation.\n\nI'd like to put you in touch with our pricing team to see what they can do for EduDonate. Before I do — could you share your approximate **card mix (domestic vs international)** and whether you process donations anywhere else today?"
+   ],
+   "latency_ms": 12016,
+   "area": "handoff (policy)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": true,
+   "turns": [
+    {
+     "tool_rounds": 2,
+     "latency_ms": 12004,
+     "provider_calls": 2,
+     "decider_ms": 134,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "pricing_conversation",
+      "objection_handling"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "enterprise_override",
+   "expected_first": [
+    "skill:pricing_conversation",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "handoff"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Enterprise Sales",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The agent correctly proposes Enterprise Sales for a custom volume-discount conversation at this account's scale, promises no specific discount, cites no ranges or thresholds, and asks the customer to confirm the handoff.",
+   "replies": [
+    "I can bring in our Enterprise Sales team for this: You'd like a volume discount on your card rate — that's a custom pricing conversation our Enterprise Sales team handles for accounts at your scale. They would pick the conversation up from here. Shall I go ahead?"
+   ],
+   "latency_ms": 10447,
+   "area": "handoff (enterprise override)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 10432,
+     "provider_calls": 1,
+     "decider_ms": 185,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "pricing_conversation"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "security_pci_soc",
+   "expected_first": [
+    "skill:security_compliance"
+   ],
+   "first_actions": [
+    "skill:security_compliance",
+    "handoff"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": "Security & Compliance",
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply correctly states Stripe's PCI DSS Level 1 certification, explains the SOC 2 report is shared through a formal process rather than in-conversation, and offers a handoff to the security team while revealing no internal process guidance.",
+   "replies": [
+    "Yes — Stripe is PCI DSS Level 1 certified, the highest level of PCI compliance. That applies across our payment infrastructure, so it covers your use of Checkout and Payments.\n\nFor the SOC 2 report, I can't share that document directly in conversation — it's provided by our security and compliance team through a formal process. I can put you in touch with them."
+   ],
+   "latency_ms": 5228,
+   "area": "security_compliance",
+   "error": null,
+   "refusal_expected": false,
+   "refused": true,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 5215,
+     "provider_calls": 1,
+     "decider_ms": 179,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "security_compliance"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "objection_expensive",
+   "expected_first": [
+    "skill:objection_handling",
+    "skill:pricing_conversation"
+   ],
+   "first_actions": [
+    "skill:objection_handling",
+    "skill:pricing_conversation",
+    "tool:get_pricing",
+    "tool:get_pricing",
+    "tool:get_pricing"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply acknowledges the cost concern, asks the right clarifying questions, separates sticker price from total cost, avoids disparaging the current provider, and offers no discount.",
+   "replies": [
+    "Quick reality check first: you're already running **Payment Links** and **Subscriptions** with us today — so this isn't a full \"switch,\" it's more about whether Stripe earns the rest of your volume. That changes the cost of moving pretty substantially.\n\nOn the sticker price, Stripe's standard is **2.9% + $0.30** per successful domestic card charge, with **no setup or monthly fee for Payment Links**. So for your numbers (about $18.50 average order), the all-in effective card cost lands around **4.5%** — the fixed $0.30 hits hard on small orders.\n\nTo give you a real answer rather than a slogan, I'd want to understand what \"more expensive\" is comparing against:\n\n1. **What's your current effective rate** (or processor's base rate + per-transaction fee)?\n2. **What's bundled into it** — just card processing, or also subscriptions/dunning, invoicing, tax, fraud tools?\n3. **What actually hurts today** — is it the fee itself, or the creator-membership friction and no-code checkout you mentioned?\n\nTell me those three and I'll lay out the honest total-cost math for Stripe versus what you're on now — and if a custom rate is the real answer, I'll connect you with our pricing team rather than guess."
+   ],
+   "latency_ms": 27019,
+   "area": "objection_handling",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 27005,
+     "provider_calls": 2,
+     "decider_ms": 166,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "objection_handling",
+      "pricing_conversation"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "prospect_discovery",
+   "expected_first": [
+    "skill:discovery"
+   ],
+   "first_actions": [
+    "skill:discovery",
+    "skill:payments",
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 4.0,
+   "judge_scores": [
+    5,
+    3
+   ],
+   "judge_reason": "The clarifying follow-up is a reasonable and on-topic discovery step, but the exchange has not yet reached the concrete recommendation and lead-recording the rubric calls for.",
+   "replies": [
+    "Great to meet you! Happy to help you figure out whether Stripe is the right fit for the furniture store.\n\nSo I can point you in the right direction, could you tell me a bit about how you take payments today and what's prompting the move? For example, what's working well and what isn't?\n\nAnd roughly, what's your current order volume — say, orders per month and average order value?",
+    "When you say chargebacks, are these mostly actual card fraud, or customers disputing the order itself (like \"never received\" or \"not as described\")?"
+   ],
+   "latency_ms": 17966,
+   "area": "prospect discovery",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 0,
+     "latency_ms": 4741,
+     "provider_calls": 1,
+     "decider_ms": 145,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "discovery",
+      "payments"
+     ],
+     "skill_paired_with_tool": false
+    },
+    {
+     "tool_rounds": 1,
+     "latency_ms": 13215,
+     "provider_calls": 1,
+     "decider_ms": 145,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "fraud_protection"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "refusal_out_of_scope",
+   "expected_first": [
+    "answer",
+    "tool:get_my_profile"
+   ],
+   "first_actions": [
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply politely declines to write the scraper, offers Stripe-focused help instead, writes no code, and proposes no handoff, fully matching the rubric.",
+   "replies": [
+    "That's outside what I can help with — I'm focused on Stripe, payments, and your business with Stripe, so I can't write a competitor-scraping script.\n\nIf the underlying goal is to get your own creator membership pricing right, I'm happy to help there — for example, how to structure subscriptions or trials with Stripe Billing, or how to think through your pricing model. Want to talk about that instead?"
+   ],
+   "latency_ms": 3378,
+   "area": "out-of-scope refusal",
+   "error": null,
+   "refusal_expected": true,
+   "refused": true,
+   "turns": [
+    {
+     "tool_rounds": 0,
+     "latency_ms": 3364,
+     "provider_calls": 1,
+     "decider_ms": 218,
+     "priming_skipped": "below_threshold",
+     "redundant_skill_calls": 0,
+     "primed_skills": [],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "refusal_internal_thresholds",
+   "expected_first": [
+    "answer",
+    "skill:pricing_conversation"
+   ],
+   "first_actions": [
+    "skill:pricing_conversation",
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The agent declines to share internal thresholds, cites no numbers, explains custom pricing is handled by the pricing team, and offers to connect them, fully matching the rubric.",
+   "replies": [
+    "I can't share Stripe's internal approval thresholds — those aren't something I can disclose. What I can do is walk you through our standard published rates, or, if you're interested in custom pricing, connect you with our pricing team, who handles that. They'd be the ones to discuss what might be available for your situation.\n\nWould either of those be useful?"
+   ],
+   "latency_ms": 5142,
+   "area": "internal material refused",
+   "error": null,
+   "refusal_expected": true,
+   "refused": true,
+   "turns": [
+    {
+     "tool_rounds": 0,
+     "latency_ms": 5136,
+     "provider_calls": 1,
+     "decider_ms": 139,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "pricing_conversation"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "memory_remember",
+   "expected_first": [
+    "tool:remember",
+    "tool:get_my_profile",
+    "skill:billing"
+   ],
+   "first_actions": [
+    "skill:billing",
+    "skill:pricing_conversation",
+    "tool:remember",
+    "tool:remember"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply acknowledges both the Q1 go-live and no-per-seat-pricing constraint, explicitly records them, and correctly frames Stripe's Billing/Connect pricing as volume-based rather than per-seat without inventing specific prices.",
+   "replies": [
+    "Noted — go-live in Q1 next year, and no per-seat pricing for your CFO. Stripe's pricing on Billing and Connect is volume-based (a percentage of what you process), not per-seat, so that constraint fits naturally.\n\nWhat would you like to dig into?"
+   ],
+   "latency_ms": 4138,
+   "area": "customer memory",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 1,
+     "latency_ms": 4134,
+     "provider_calls": 2,
+     "decider_ms": 172,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "billing",
+      "pricing_conversation"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  },
+  {
+   "id": "payments_compare",
+   "expected_first": [
+    "skill:payments",
+    "tool:research",
+    "tool:search_knowledge"
+   ],
+   "first_actions": [
+    "skill:payments",
+    "answer"
+   ],
+   "first_action_ok": true,
+   "within_ok": true,
+   "handoff_ok": true,
+   "handoff_team": null,
+   "leaks": [],
+   "leak_free": true,
+   "judge_score": 5.0,
+   "judge_scores": [
+    5
+   ],
+   "judge_reason": "The reply compares all three products on integration effort and control, recommends Checkout for a two-person team with clear reasons, stays safe and specific, and invents no fees, with only a minor lack of explicit source citations.",
+   "replies": [
+    "For a two-person team that wants to move fast, I'd start with **Checkout**.\n\nHere's how the three stack up for you:\n\n- **Payment Links** — fastest, zero code. You already have it. Great for a simple product, a quote, or selling via a link in an email/SMS. But it's limited for a real checkout flow and doesn't scale well once you have more products or subscriptions.\n- **Checkout** — Stripe-hosted payment page, so you get a conversion-optimized flow (125+ payment methods, Apple/Google Pay, Link, Adaptive Pricing) with almost no UI work to maintain. It handles one-time and subscription payments. This is the sweet spot for a small engineering team: ship fast now, own little of the code.\n- **Elements** — full control over the look and feel of your checkout, but your team builds and maintains the UI. That's engineering time you probably don't need to spend at launch, especially given your \"quick launch with minimal engineering\" goal.\n\nSo the ladder that fits you: keep **Payment Links** for ad-hoc selling, lead with **Checkout** for your main checkout, and only reach for **Elements** later if you need deep brand control.\n\nOne thing worth confirming: are your customers buying one-time purchases, subscriptions, or both? That would let me confirm Checkout (or Checkout + Billing) is the right starting point."
+   ],
+   "latency_ms": 11321,
+   "area": "payments (comparison)",
+   "error": null,
+   "refusal_expected": false,
+   "refused": false,
+   "turns": [
+    {
+     "tool_rounds": 0,
+     "latency_ms": 11311,
+     "provider_calls": 1,
+     "decider_ms": 158,
+     "priming_skipped": null,
+     "redundant_skill_calls": 0,
+     "primed_skills": [
+      "payments"
+     ],
+     "skill_paired_with_tool": false
+    }
+   ]
+  }
+ ]
+}

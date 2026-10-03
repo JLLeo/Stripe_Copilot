@@ -1,0 +1,2780 @@
+{
+ "split": "test",
+ "source": "golden-test.json, the four-arm run of #17 (commit 0b8a3d9): the Decider before #18 told it when the customer is a new prospect",
+ "decider": {
+  "model": "jev-latest",
+  "threshold": 0.55,
+  "margin": 0.15,
+  "timeout_seconds": 0.7
+ },
+ "cases": [
+  {
+   "id": "ss-prospect-card-fee-first",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ]
+    ],
+    "acceptable": [
+     "pricing_conversation"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "get_pricing"
+     ]
+    ],
+    "acceptable": [
+     "ask_customer"
+    ]
+   },
+   "first_action": [
+    "skill:discovery"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-prospect-45m-call",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ]
+    ],
+    "acceptable": [
+     "request_handoff"
+    ]
+   },
+   "first_action": [
+    "skill:discovery"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-person-video-call",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "handoff"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-prepaid-credits-january",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:billing"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-month-end-netsuite",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "data"
+     ]
+    ],
+    "acceptable": [
+     "billing"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:data"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-good-buyers-blocked",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "ask_customer"
+    ]
+   },
+   "first_action": [
+    "skill:fraud_protection"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-tap-to-pay-fee",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": [
+     "terminal"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "get_pricing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:pricing_conversation"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-dutch-belgian-methods",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "request_handoff"
+    ]
+   },
+   "first_action": [
+    "skill:payments"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-elements-pci-scope",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "request_handoff"
+    ]
+   },
+   "first_action": [
+    "skill:security_compliance"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-singapore-stores-zh",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:terminal"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-prospect-tutoring-es",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ],
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": [
+     "pricing_conversation"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge"
+     ],
+     [
+      "get_pricing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:discovery",
+    "skill:connect",
+    "skill:pricing_conversation"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-prospect-hr-soc2-invoices",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ],
+     [
+      "security_compliance"
+     ],
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "request_handoff"
+    ]
+   },
+   "first_action": [
+    "skill:discovery",
+    "skill:security_compliance",
+    "skill:billing"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-eu-vat-euro-plans",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "tax"
+     ],
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:tax",
+    "skill:billing"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-dashboard-queries-proration",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "data"
+     ],
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:data",
+    "skill:billing"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-market-stall-qr-orders",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ],
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:terminal",
+    "skill:payments"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-fake-sellers-stolen-cards",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ],
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "request_handoff"
+    ]
+   },
+   "first_action": [
+    "skill:connect",
+    "skill:fraud_protection"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-checkout-pci-sales-tax",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ],
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:security_compliance",
+    "skill:tax"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-card-testing-fraud-teams",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "fraud_protection"
+     ],
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ],
+     [
+      "get_pricing"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:fraud_protection",
+    "skill:pricing_conversation"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-course-platform-ramble",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ],
+     [
+      "tax"
+     ],
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "request_handoff",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:connect",
+    "skill:tax",
+    "skill:billing"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-too-technical-currencies",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ],
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:objection_handling",
+    "skill:payments"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "sm-applepay-on-top",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "get_pricing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:pricing_conversation"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "sm-donors-monthly-gift",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:billing"
+   ],
+   "in_context": [
+    "payments",
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "sm-branded-checkout-no-code",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:payments"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  },
+  {
+   "id": "sm-patient-invoices-hipaa",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "search_knowledge"
+    ]
+   },
+   "first_action": [
+    "skill:security_compliance"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  },
+  {
+   "id": "sm-dunning-tool-rant",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [],
+    "acceptable": [
+     "remember",
+     "search_knowledge"
+    ]
+   },
+   "first_action": [
+    "skill:objection_handling"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  },
+  {
+   "id": "sm-es-tarjetas-robadas",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ]
+    ],
+    "acceptable": [
+     "search_knowledge"
+    ]
+   },
+   "first_action": [
+    "skill:fraud_protection"
+   ],
+   "in_context": [
+    "discovery"
+   ]
+  },
+  {
+   "id": "sm-pause-ends",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "tool:search_knowledge",
+    "tool:remember"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  },
+  {
+   "id": "sm-caregiver-verification-time",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "tool:search_knowledge"
+   ],
+   "in_context": [
+    "connect"
+   ]
+  },
+  {
+   "id": "sm-candles-monthly-cost",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ]
+    ],
+    "acceptable": [
+     "get_pricing"
+    ]
+   },
+   "first_action": [
+    "tool:capture_lead"
+   ],
+   "in_context": [
+    "discovery",
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "sm-offtopic-product-names",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [],
+    "acceptable": []
+   },
+   "first_action": [
+    "answer"
+   ],
+   "in_context": [
+    "tax"
+   ]
+  },
+  {
+   "id": "mm-zh-disputes-and-front-desk",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "fraud_protection"
+     ],
+     [
+      "terminal"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:fraud_protection",
+    "skill:terminal"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "mm-fraud-vendor-and-disputes",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ],
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:objection_handling",
+    "skill:fraud_protection"
+   ],
+   "in_context": [
+    "connect"
+   ]
+  },
+  {
+   "id": "mm-eu-tax-cost-and-registration",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "pricing_conversation"
+     ],
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "get_pricing"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:pricing_conversation",
+    "skill:tax"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "mm-warehouse-counters-sales-tax",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ],
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:terminal",
+    "skill:tax"
+   ],
+   "in_context": [
+    "fraud_protection"
+   ]
+  },
+  {
+   "id": "mm-onsite-cut-and-bank-transfer",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ],
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:connect",
+    "skill:payments"
+   ],
+   "in_context": [
+    "terminal"
+   ]
+  },
+  {
+   "id": "mm-bank-terminals-objection",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ],
+     [
+      "terminal"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:objection_handling",
+    "skill:terminal"
+   ],
+   "in_context": [
+    "payments",
+    "tax"
+   ]
+  },
+  {
+   "id": "mm-au-residency-new-countries",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ],
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:security_compliance",
+    "skill:connect"
+   ],
+   "in_context": [
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "mm-net30-and-campaign-report",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "billing"
+     ],
+     [
+      "data"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:billing",
+    "skill:data"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "mm-bike-shop-counters",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ],
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:terminal",
+    "skill:fraud_protection"
+   ],
+   "in_context": [
+    "discovery"
+   ]
+  },
+  {
+   "id": "mm-soc2-and-three-year-discount",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ],
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:security_compliance",
+    "skill:pricing_conversation"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  }
+ ],
+ "decisions": [
+  {
+   "case_id": "ss-prospect-card-fee-first",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 0
+   },
+   "first_actions": [
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": false,
+   "latency_ms": 237,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.27,
+    "connect": 0.15,
+    "data": 0.03,
+    "discovery": 0.23,
+    "fraud_protection": 0.05,
+    "objection_handling": 0.18,
+    "payments": 0.7,
+    "pricing_conversation": 0.96,
+    "security_compliance": 0.11,
+    "tax": 0.07,
+    "terminal": 0.6
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-prospect-45m-call",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "payments",
+    "discovery"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:discovery"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 172,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.1,
+    "connect": 0.08,
+    "data": 0.02,
+    "discovery": 0.61,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.07,
+    "payments": 0.7,
+    "pricing_conversation": 0.24,
+    "security_compliance": 0.11,
+    "tax": 0.04,
+    "terminal": 0.04
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-person-video-call",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 178,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.02,
+    "connect": 0.06,
+    "data": 0.02,
+    "discovery": 0.18,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.04,
+    "payments": 0.08,
+    "pricing_conversation": 0.02,
+    "security_compliance": 0.08,
+    "tax": 0.02,
+    "terminal": 0.01
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "ss-prepaid-credits-january",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "billing"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:billing"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 167,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.89,
+    "connect": 0.03,
+    "data": 0.18,
+    "discovery": 0.11,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.14,
+    "payments": 0.12,
+    "pricing_conversation": 0.26,
+    "security_compliance": 0.04,
+    "tax": 0.02,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-month-end-netsuite",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 181,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.46,
+    "connect": 0.34,
+    "data": 0.82,
+    "discovery": 0.28,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.04,
+    "payments": 0.05,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.03,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-good-buyers-blocked",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "fraud_protection",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 153,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.08,
+    "data": 0.09,
+    "discovery": 0.24,
+    "fraud_protection": 0.93,
+    "objection_handling": 0.07,
+    "payments": 0.8,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.18,
+    "tax": 0.02,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-tap-to-pay-fee",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 183,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.11,
+    "connect": 0.1,
+    "data": 0.03,
+    "discovery": 0.31,
+    "fraud_protection": 0.18,
+    "objection_handling": 0.07,
+    "payments": 0.67,
+    "pricing_conversation": 0.96,
+    "security_compliance": 0.17,
+    "tax": 0.03,
+    "terminal": 0.92
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-dutch-belgian-methods",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 175,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.04,
+    "data": 0.03,
+    "discovery": 0.1,
+    "fraud_protection": 0.05,
+    "objection_handling": 0.05,
+    "payments": 0.96,
+    "pricing_conversation": 0.04,
+    "security_compliance": 0.12,
+    "tax": 0.11,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-elements-pci-scope",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "security_compliance",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:security_compliance",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 235,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.03,
+    "data": 0.03,
+    "discovery": 0.09,
+    "fraud_protection": 0.13,
+    "objection_handling": 0.05,
+    "payments": 0.74,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.97,
+    "tax": 0.02,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-singapore-stores-zh",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "terminal",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:terminal",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 228,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.04,
+    "data": 0.4,
+    "discovery": 0.36,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.05,
+    "payments": 0.6,
+    "pricing_conversation": 0.05,
+    "security_compliance": 0.29,
+    "tax": 0.08,
+    "terminal": 0.94
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-prospect-tutoring-es",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 204,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.56,
+    "connect": 0.97,
+    "data": 0.03,
+    "discovery": 0.53,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.04,
+    "payments": 0.82,
+    "pricing_conversation": 0.93,
+    "security_compliance": 0.21,
+    "tax": 0.12,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-prospect-hr-soc2-invoices",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "security_compliance",
+    "billing"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 3,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:security_compliance",
+    "skill:billing"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 252,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.9,
+    "connect": 0.06,
+    "data": 0.04,
+    "discovery": 0.18,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.06,
+    "payments": 0.53,
+    "pricing_conversation": 0.17,
+    "security_compliance": 0.93,
+    "tax": 0.04,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-eu-vat-euro-plans",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "tax"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:tax"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 155,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.96,
+    "connect": 0.03,
+    "data": 0.03,
+    "discovery": 0.09,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.03,
+    "payments": 0.62,
+    "pricing_conversation": 0.37,
+    "security_compliance": 0.22,
+    "tax": 0.97,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-dashboard-queries-proration",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "billing",
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:billing",
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 200,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.96,
+    "connect": 0.02,
+    "data": 0.61,
+    "discovery": 0.09,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.04,
+    "payments": 0.08,
+    "pricing_conversation": 0.2,
+    "security_compliance": 0.04,
+    "tax": 0.02,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-market-stall-qr-orders",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "payments",
+    "terminal"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:terminal"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 196,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.11,
+    "data": 0.02,
+    "discovery": 0.27,
+    "fraud_protection": 0.05,
+    "objection_handling": 0.07,
+    "payments": 0.92,
+    "pricing_conversation": 0.07,
+    "security_compliance": 0.26,
+    "tax": 0.04,
+    "terminal": 0.91
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-fake-sellers-stolen-cards",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "fraud_protection",
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 205,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.75,
+    "data": 0.11,
+    "discovery": 0.39,
+    "fraud_protection": 0.95,
+    "objection_handling": 0.04,
+    "payments": 0.14,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.34,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-checkout-pci-sales-tax",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "tax"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:tax"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 164,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.03,
+    "data": 0.03,
+    "discovery": 0.13,
+    "fraud_protection": 0.09,
+    "objection_handling": 0.07,
+    "payments": 0.61,
+    "pricing_conversation": 0.05,
+    "security_compliance": 0.94,
+    "tax": 0.95,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-card-testing-fraud-teams",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "fraud_protection",
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 208,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.16,
+    "connect": 0.04,
+    "data": 0.06,
+    "discovery": 0.13,
+    "fraud_protection": 0.96,
+    "objection_handling": 0.09,
+    "payments": 0.12,
+    "pricing_conversation": 0.93,
+    "security_compliance": 0.18,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-course-platform-ramble",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 3,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": false,
+   "latency_ms": 185,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.95,
+    "connect": 0.95,
+    "data": 0.18,
+    "discovery": 0.5,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.06,
+    "payments": 0.3,
+    "pricing_conversation": 0.11,
+    "security_compliance": 0.26,
+    "tax": 0.96,
+    "terminal": 0.01
+   },
+   "skipped": "flat",
+   "error": null
+  },
+  {
+   "case_id": "ms-too-technical-currencies",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "test",
+   "skills": [
+    "payments",
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 147,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.18,
+    "connect": 0.09,
+    "data": 0.02,
+    "discovery": 0.5,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.88,
+    "payments": 0.93,
+    "pricing_conversation": 0.09,
+    "security_compliance": 0.16,
+    "tax": 0.17,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-applepay-on-top",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 148,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.14,
+    "connect": 0.03,
+    "data": 0.02,
+    "discovery": 0.05,
+    "fraud_protection": 0.07,
+    "objection_handling": 0.51,
+    "pricing_conversation": 0.93,
+    "security_compliance": 0.11,
+    "tax": 0.02,
+    "terminal": 0.04
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-donors-monthly-gift",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "billing"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:billing"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 199,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.57,
+    "connect": 0.03,
+    "data": 0.02,
+    "discovery": 0.08,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.14,
+    "security_compliance": 0.05,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-branded-checkout-no-code",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 155,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.1,
+    "data": 0.02,
+    "discovery": 0.12,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.11,
+    "payments": 0.75,
+    "pricing_conversation": 0.04,
+    "security_compliance": 0.03,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-patient-invoices-hipaa",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "security_compliance"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:security_compliance"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 184,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.06,
+    "data": 0.04,
+    "discovery": 0.09,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.17,
+    "payments": 0.11,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.95,
+    "tax": 0.03,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-dunning-tool-rant",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 206,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.03,
+    "data": 0.17,
+    "discovery": 0.08,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.96,
+    "payments": 0.09,
+    "pricing_conversation": 0.07,
+    "security_compliance": 0.04,
+    "tax": 0.01,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-es-tarjetas-robadas",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "fraud_protection",
+    "security_compliance"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:security_compliance"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 172,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.05,
+    "connect": 0.1,
+    "data": 0.06,
+    "fraud_protection": 0.94,
+    "objection_handling": 0.08,
+    "payments": 0.35,
+    "pricing_conversation": 0.06,
+    "security_compliance": 0.7,
+    "tax": 0.02,
+    "terminal": 0.06
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-pause-ends",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 188,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.03,
+    "data": 0.04,
+    "discovery": 0.04,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.03,
+    "payments": 0.07,
+    "pricing_conversation": 0.05,
+    "security_compliance": 0.02,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "sm-caregiver-verification-time",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 172,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.08,
+    "data": 0.04,
+    "discovery": 0.07,
+    "fraud_protection": 0.14,
+    "objection_handling": 0.05,
+    "payments": 0.08,
+    "pricing_conversation": 0.04,
+    "security_compliance": 0.39,
+    "tax": 0.03,
+    "terminal": 0.02
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "sm-candles-monthly-cost",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 146,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.08,
+    "connect": 0.05,
+    "data": 0.04,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.04,
+    "payments": 0.37,
+    "security_compliance": 0.02,
+    "tax": 0.04,
+    "terminal": 0.04
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "sm-offtopic-product-names",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "test",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 121,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.03,
+    "data": 0.02,
+    "discovery": 0.05,
+    "fraud_protection": 0.01,
+    "objection_handling": 0.02,
+    "payments": 0.04,
+    "pricing_conversation": 0.02,
+    "security_compliance": 0.02,
+    "terminal": 0.03
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "mm-zh-disputes-and-front-desk",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "fraud_protection",
+    "terminal"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:terminal"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 174,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.12,
+    "data": 0.04,
+    "discovery": 0.07,
+    "fraud_protection": 0.88,
+    "objection_handling": 0.11,
+    "pricing_conversation": 0.05,
+    "security_compliance": 0.23,
+    "tax": 0.03,
+    "terminal": 0.61
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-fraud-vendor-and-disputes",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "fraud_protection",
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 204,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "data": 0.09,
+    "discovery": 0.09,
+    "fraud_protection": 0.94,
+    "objection_handling": 0.91,
+    "payments": 0.12,
+    "pricing_conversation": 0.11,
+    "security_compliance": 0.2,
+    "tax": 0.02,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-eu-tax-cost-and-registration",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "tax",
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:tax",
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 161,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.12,
+    "connect": 0.04,
+    "data": 0.03,
+    "discovery": 0.11,
+    "fraud_protection": 0.07,
+    "objection_handling": 0.09,
+    "pricing_conversation": 0.94,
+    "security_compliance": 0.34,
+    "tax": 0.96,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-warehouse-counters-sales-tax",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "tax"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:tax"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 156,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.04,
+    "data": 0.04,
+    "discovery": 0.07,
+    "objection_handling": 0.06,
+    "payments": 0.67,
+    "pricing_conversation": 0.06,
+    "security_compliance": 0.17,
+    "tax": 0.95,
+    "terminal": 0.84
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-onsite-cut-and-bank-transfer",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "connect",
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:connect",
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 157,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.19,
+    "connect": 0.88,
+    "data": 0.04,
+    "discovery": 0.04,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.08,
+    "payments": 0.53,
+    "pricing_conversation": 0.72,
+    "security_compliance": 0.21,
+    "tax": 0.11
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-bank-terminals-objection",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 178,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.03,
+    "data": 0.57,
+    "discovery": 0.14,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.93,
+    "pricing_conversation": 0.22,
+    "security_compliance": 0.08,
+    "terminal": 0.87
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-au-residency-new-countries",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "security_compliance",
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:security_compliance",
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 165,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.07,
+    "connect": 0.66,
+    "data": 0.03,
+    "discovery": 0.09,
+    "fraud_protection": 0.07,
+    "objection_handling": 0.06,
+    "payments": 0.17,
+    "security_compliance": 0.92,
+    "tax": 0.06,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-net30-and-campaign-report",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "billing",
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:billing",
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 166,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.85,
+    "connect": 0.04,
+    "data": 0.64,
+    "discovery": 0.07,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.06,
+    "pricing_conversation": 0.07,
+    "security_compliance": 0.09,
+    "tax": 0.04,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-bike-shop-counters",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "terminal"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:terminal"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 372,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.06,
+    "data": 0.04,
+    "fraud_protection": 0.78,
+    "objection_handling": 0.04,
+    "payments": 0.75,
+    "pricing_conversation": 0.21,
+    "security_compliance": 0.5,
+    "tax": 0.03,
+    "terminal": 0.92
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-soc2-and-three-year-discount",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "test",
+   "skills": [
+    "security_compliance",
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:security_compliance",
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 221,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.08,
+    "data": 0.09,
+    "discovery": 0.11,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.22,
+    "payments": 0.05,
+    "pricing_conversation": 0.93,
+    "security_compliance": 0.95,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  }
+ ]
+}

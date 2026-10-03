@@ -3,10 +3,11 @@ Priming — the Skills a turn calls for, in the conversation before the model's 
 
 Before the first model call of a turn, the Decider is asked one yes/no question
 per Skill whose body is not already in the conversation, all in one request,
-about a small bounded state: the customer's message, the key profile fields,
-the latest Customer Memory, the opening of the previous reply, and the skills
-already loaded. What it names with enough confidence goes in as one
-harness-authored `system` message just before the customer's new message
+about a small bounded state: the customer's message, whether the customer is a
+new prospect, the key profile fields, the latest Customer Memory, the opening of
+the previous reply, and the skills already loaded. What it names with enough
+confidence goes in as one harness-authored `system` message just before the
+customer's new message
 (`skills.primed_message`), persisted with the turn so the next turn's prefix is
 the same bytes (ADR 0005).
 
@@ -34,7 +35,8 @@ from app.harness.skills import Skill, primed_message
 
 log = logging.getLogger(__name__)
 
-MAX_PRIMED = 2  # one or two skills cover a turn; more above the threshold reads as an unsure answer
+MAX_PRIMED = 2  # the main model never loads more than two skills in a turn (#14); bodies are 500–1,200 tokens each
+MARGIN_TOLERANCE = 1e-9  # probabilities come with two decimals; 0.80 - 0.60 is 0.20000000000000007 in floating point
 DECIDER_MESSAGE_CHARS = 4_000  # the opening of a long message states what it is about; the model still gets all of it
 PREVIOUS_REPLY_CHARS = 500
 MEMORY_ENTRIES = 3
@@ -42,7 +44,6 @@ MEMORY_ENTRIES = 3
 # Why nothing was primed, beyond the Decider's own reasons (decider.py).
 SKIP_ALL_LOADED = "all_loaded"  # every skill is already in the conversation; nothing to ask
 SKIP_BELOW_THRESHOLD = "below_threshold"
-SKIP_FLAT = "flat"  # three or more above the threshold with no clear leader
 SKIP_ERROR = "error"  # something in Priming itself broke; the turn still runs
 
 # The profile fields that say which area a business is in; the rest describe its size and maturity.
@@ -96,19 +97,23 @@ def prime(
 def choose(probabilities: dict[str, float], threshold: float, margin: float) -> tuple[list[str], str | None]:
     """The selection rule: (the skills to prime, most probable first) or ([], why none).
 
-    None at or above the threshold → none. One or two → those. Three or more → the top one
-    only if it leads the third by the margin; otherwise none, because a flat answer is an
-    unsure one and the model fetching its own skill costs a round, not the customer.
+    None at or above the threshold → none. One or two → those. Three or more → the top one,
+    and the second too when it is within the margin of the top. Several skills above the
+    threshold is usually a turn that asks for several things, not an unsure answer, so the
+    rule never gives up on it (#18 measured the rule that did: it only lost rounds).
     """
-    ranked = sorted(probabilities.items(), key=lambda kv: (-kv[1], kv[0]))
-    above = [name for name, p in ranked if p >= threshold]
+    order = ranked(probabilities)
+    above = [name for name, p in order if p >= threshold]
     if not above:
         return [], SKIP_BELOW_THRESHOLD
     if len(above) <= MAX_PRIMED:
         return above, None
-    if ranked[0][1] - ranked[2][1] >= margin:
-        return [ranked[0][0]], None
-    return [], SKIP_FLAT
+    return [name for name, p in order[:MAX_PRIMED] if order[0][1] - p <= margin + MARGIN_TOLERANCE], None
+
+
+def ranked(probabilities: dict[str, float]) -> list[tuple[str, float]]:
+    """Most probable first; ties by name, so the same answers always rank the same way."""
+    return sorted(probabilities.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
 def _state(customer_id: str | None, message: str, working_memory: list[dict[str, Any]], in_context: set[str]) -> dict[str, Any]:
@@ -127,6 +132,8 @@ def _state(customer_id: str | None, message: str, working_memory: list[dict[str,
     )
     return {
         "customer_message": message[:DECIDER_MESSAGE_CHARS],
+        # Said outright: the main model's customer block says so in words, and discovery's trigger is exactly this.
+        "new_prospect": customer_id is None,
         "customer": customer,
         "remembered": remembered,
         "previous_agent_reply": previous.strip()[:PREVIOUS_REPLY_CHARS],

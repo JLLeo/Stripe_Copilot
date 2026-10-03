@@ -1,0 +1,2805 @@
+{
+ "split": "dev",
+ "source": "golden-dev.json, the four-arm run of #17 (commit 0b8a3d9): the Decider before #18 told it when the customer is a new prospect",
+ "decider": {
+  "model": "jev-latest",
+  "threshold": 0.55,
+  "margin": 0.15,
+  "timeout_seconds": 0.7
+ },
+ "cases": [
+  {
+   "id": "ss-prospect-mobile-grooming",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ]
+    ],
+    "acceptable": [
+     "terminal"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ]
+    ],
+    "acceptable": [
+     "search_knowledge",
+     "ask_customer"
+    ]
+   },
+   "first_action": [
+    "skill:discovery"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-prospect-cafes-es",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ]
+    ],
+    "acceptable": [
+     "search_knowledge",
+     "ask_customer"
+    ]
+   },
+   "first_action": [
+    "skill:discovery"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-offtopic-job-ad",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [],
+    "acceptable": []
+   },
+   "first_action": [
+    "answer"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-renewals-quietly-lapse",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:billing"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-providers-same-day-pay",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "get_pricing"
+    ]
+   },
+   "first_action": [
+    "skill:connect"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-gem-packs-disputed",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:fraud_protection"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-payouts-provider-objection",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ]
+    ],
+    "acceptable": [
+     "connect"
+    ]
+   },
+   "tools": {
+    "required": [],
+    "acceptable": [
+     "search_knowledge",
+     "get_my_profile",
+     "get_pricing"
+    ]
+   },
+   "first_action": [
+    "skill:objection_handling"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-fare-fixed-fee",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": [
+     "objection_handling"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "get_pricing"
+    ]
+   },
+   "first_action": [
+    "skill:pricing_conversation"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-donors-bank-account",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_pricing",
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:payments"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ss-register-30-states",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "search_knowledge",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:tax"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-prospect-yoga-studios",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ],
+     [
+      "billing"
+     ],
+     [
+      "terminal"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:discovery",
+    "skill:billing",
+    "skill:terminal"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-prospect-skincare-zh",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ],
+     [
+      "payments"
+     ],
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:discovery",
+    "skill:payments",
+    "skill:fraud_protection"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-1099s-booking-fee-tax",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ],
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:connect",
+    "skill:tax"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-residency-snowflake",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ],
+     [
+      "data"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:security_compliance",
+    "skill:data"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-match-interchange-plus",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "pricing_conversation"
+     ],
+     [
+      "objection_handling"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:pricing_conversation",
+    "skill:objection_handling"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-festival-readers-cost",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ],
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "get_pricing"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:terminal",
+    "skill:pricing_conversation"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-ciso-card-data",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ],
+     [
+      "security_compliance"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:objection_handling",
+    "skill:security_compliance"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-driver-reports-cashout",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "data"
+     ],
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:data",
+    "skill:connect"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-buses-route-revenue",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ],
+     [
+      "data"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "request_handoff",
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:terminal",
+    "skill:data"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "ms-klarna-vip-chargebacks",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ],
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "get_my_profile"
+    ]
+   },
+   "first_action": [
+    "skill:payments",
+    "skill:fraud_protection"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "sm-bot-then-bakery",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ]
+    ],
+    "acceptable": [
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ]
+    ],
+    "acceptable": [
+     "ask_customer"
+    ]
+   },
+   "first_action": [
+    "skill:discovery"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "sm-designers-take-a-cut",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:connect"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "sm-zh-saas-overseas-tax",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": [
+     "billing"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:tax"
+   ],
+   "in_context": [
+    "discovery"
+   ]
+  },
+  {
+   "id": "sm-taco-truck-window",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "terminal"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": [
+     "get_pricing"
+    ]
+   },
+   "first_action": [
+    "skill:terminal"
+   ],
+   "in_context": [
+    "discovery"
+   ]
+  },
+  {
+   "id": "sm-spikes-into-bigquery",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "data"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:data"
+   ],
+   "in_context": [
+    "fraud_protection",
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "sm-waive-instant-fee",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "get_pricing"
+    ]
+   },
+   "first_action": [
+    "skill:pricing_conversation"
+   ],
+   "in_context": [
+    "connect"
+   ]
+  },
+  {
+   "id": "sm-correction-we-pay-shops",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:connect"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "sm-trade-counter-save-card",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "tool:search_knowledge"
+   ],
+   "in_context": [
+    "billing",
+    "terminal"
+   ]
+  },
+  {
+   "id": "sm-backtest-rule",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "tool:search_knowledge"
+   ],
+   "in_context": [
+    "fraud_protection"
+   ]
+  },
+  {
+   "id": "sm-walk-our-team-through",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "handoff"
+   ],
+   "in_context": [
+    "connect"
+   ]
+  },
+  {
+   "id": "mm-offtopic-then-leather",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "discovery"
+     ],
+     [
+      "terminal"
+     ]
+    ],
+    "acceptable": [
+     "pricing_conversation",
+     "payments"
+    ]
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "get_pricing"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:discovery",
+    "skill:terminal"
+   ],
+   "in_context": []
+  },
+  {
+   "id": "mm-es-oxxo-boleto-impuestos",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ],
+     [
+      "tax"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "request_handoff"
+    ]
+   },
+   "first_action": [
+    "skill:payments",
+    "skill:tax"
+   ],
+   "in_context": [
+    "discovery"
+   ]
+  },
+  {
+   "id": "mm-trial-signups-stolen-cards",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "fraud_protection"
+     ],
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:fraud_protection",
+    "skill:billing"
+   ],
+   "in_context": [
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "mm-listing-fee-and-vendor-payouts",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "billing"
+     ],
+     [
+      "connect"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:billing",
+    "skill:connect"
+   ],
+   "in_context": [
+    "data"
+   ]
+  },
+  {
+   "id": "mm-one-click-and-method-report",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ],
+     [
+      "data"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:payments",
+    "skill:data"
+   ],
+   "in_context": [
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "mm-ca-au-bank-debits",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "payments"
+     ],
+     [
+      "pricing_conversation"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge"
+     ],
+     [
+      "get_pricing"
+     ]
+    ],
+    "acceptable": [
+     "remember"
+    ]
+   },
+   "first_action": [
+    "skill:payments",
+    "skill:pricing_conversation"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  },
+  {
+   "id": "mm-bank-login-and-instant-verify",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "security_compliance"
+     ],
+     [
+      "payments"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:security_compliance",
+    "skill:payments"
+   ],
+   "in_context": [
+    "billing"
+   ]
+  },
+  {
+   "id": "mm-dispute-analysis-selective-3ds",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "data"
+     ],
+     [
+      "fraud_protection"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "search_knowledge",
+      "research"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:data",
+    "skill:fraud_protection"
+   ],
+   "in_context": [
+    "payments"
+   ]
+  },
+  {
+   "id": "mm-ops-meeting-dump",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "tax"
+     ],
+     [
+      "security_compliance"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "request_handoff"
+     ]
+    ],
+    "acceptable": [
+     "search_knowledge"
+    ]
+   },
+   "first_action": [
+    "skill:tax",
+    "skill:security_compliance"
+   ],
+   "in_context": [
+    "connect",
+    "pricing_conversation"
+   ]
+  },
+  {
+   "id": "mm-bookkeeper-quickbooks",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": {
+    "required": [
+     [
+      "objection_handling"
+     ],
+     [
+      "billing"
+     ]
+    ],
+    "acceptable": []
+   },
+   "tools": {
+    "required": [
+     [
+      "capture_lead"
+     ],
+     [
+      "search_knowledge"
+     ]
+    ],
+    "acceptable": []
+   },
+   "first_action": [
+    "skill:objection_handling",
+    "skill:billing"
+   ],
+   "in_context": [
+    "discovery",
+    "payments",
+    "tax"
+   ]
+  }
+ ],
+ "decisions": [
+  {
+   "case_id": "ss-prospect-mobile-grooming",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 0,
+    "required": 1,
+    "found": 0
+   },
+   "first_actions": [
+    "skill:payments"
+   ],
+   "first_action_ok": false,
+   "latency_ms": 170,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.22,
+    "connect": 0.12,
+    "data": 0.06,
+    "discovery": 0.77,
+    "fraud_protection": 0.08,
+    "objection_handling": 0.07,
+    "payments": 0.87,
+    "pricing_conversation": 0.23,
+    "security_compliance": 0.19,
+    "tax": 0.04,
+    "terminal": 0.67
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-prospect-cafes-es",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "payments",
+    "discovery"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:discovery"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 301,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.07,
+    "connect": 0.09,
+    "data": 0.02,
+    "discovery": 0.78,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.03,
+    "payments": 0.94,
+    "pricing_conversation": 0.1,
+    "security_compliance": 0.2,
+    "tax": 0.13,
+    "terminal": 0.04
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-offtopic-job-ad",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 169,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.02,
+    "connect": 0.03,
+    "data": 0.01,
+    "discovery": 0.09,
+    "fraud_protection": 0.01,
+    "objection_handling": 0.02,
+    "payments": 0.02,
+    "pricing_conversation": 0.02,
+    "security_compliance": 0.02,
+    "tax": 0.01,
+    "terminal": 0.01
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "ss-renewals-quietly-lapse",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "billing"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:billing"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 161,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.95,
+    "connect": 0.04,
+    "data": 0.15,
+    "discovery": 0.44,
+    "fraud_protection": 0.19,
+    "objection_handling": 0.05,
+    "payments": 0.21,
+    "pricing_conversation": 0.04,
+    "security_compliance": 0.04,
+    "tax": 0.01,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-providers-same-day-pay",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 247,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.17,
+    "connect": 0.93,
+    "data": 0.04,
+    "discovery": 0.06,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.05,
+    "payments": 0.06,
+    "pricing_conversation": 0.13,
+    "security_compliance": 0.06,
+    "tax": 0.07,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-gem-packs-disputed",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "fraud_protection"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:fraud_protection"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 165,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.1,
+    "connect": 0.06,
+    "data": 0.28,
+    "discovery": 0.07,
+    "fraud_protection": 0.95,
+    "objection_handling": 0.06,
+    "payments": 0.21,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.34,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-payouts-provider-objection",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 185,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.05,
+    "connect": 0.78,
+    "data": 0.03,
+    "discovery": 0.13,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.92,
+    "payments": 0.07,
+    "pricing_conversation": 0.7,
+    "security_compliance": 0.26,
+    "tax": 0.05,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-fare-fixed-fee",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "pricing_conversation",
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 333,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.17,
+    "connect": 0.2,
+    "data": 0.08,
+    "discovery": 0.07,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.55,
+    "payments": 0.47,
+    "pricing_conversation": 0.97,
+    "security_compliance": 0.04,
+    "tax": 0.02,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-donors-bank-account",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 217,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.08,
+    "data": 0.02,
+    "discovery": 0.07,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.05,
+    "payments": 0.94,
+    "pricing_conversation": 0.12,
+    "security_compliance": 0.23,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ss-register-30-states",
+   "arm": "decider",
+   "cell": "single_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "tax"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:tax"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 179,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.2,
+    "connect": 0.03,
+    "data": 0.03,
+    "discovery": 0.18,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.03,
+    "payments": 0.04,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.16,
+    "tax": 0.97,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-prospect-yoga-studios",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 3,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": false,
+   "latency_ms": 230,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.93,
+    "connect": 0.04,
+    "data": 0.03,
+    "discovery": 0.48,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.04,
+    "payments": 0.85,
+    "pricing_conversation": 0.14,
+    "security_compliance": 0.12,
+    "tax": 0.03,
+    "terminal": 0.92
+   },
+   "skipped": "flat",
+   "error": null
+  },
+  {
+   "case_id": "ms-prospect-skincare-zh",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "fraud_protection"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 3,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:fraud_protection"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 197,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.07,
+    "connect": 0.1,
+    "data": 0.03,
+    "discovery": 0.73,
+    "fraud_protection": 0.94,
+    "objection_handling": 0.07,
+    "payments": 0.92,
+    "pricing_conversation": 0.16,
+    "security_compliance": 0.31,
+    "tax": 0.05,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-1099s-booking-fee-tax",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "tax",
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:tax",
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 244,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.12,
+    "connect": 0.82,
+    "data": 0.05,
+    "discovery": 0.08,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.04,
+    "payments": 0.09,
+    "pricing_conversation": 0.07,
+    "security_compliance": 0.12,
+    "tax": 0.92,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-residency-snowflake",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "security_compliance",
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:security_compliance",
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 207,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.19,
+    "connect": 0.07,
+    "data": 0.86,
+    "discovery": 0.15,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.04,
+    "payments": 0.12,
+    "pricing_conversation": 0.03,
+    "security_compliance": 0.96,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-match-interchange-plus",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 197,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.06,
+    "connect": 0.05,
+    "data": 0.04,
+    "discovery": 0.14,
+    "fraud_protection": 0.57,
+    "objection_handling": 0.96,
+    "payments": 0.7,
+    "pricing_conversation": 0.96,
+    "security_compliance": 0.16,
+    "tax": 0.03,
+    "terminal": 0.07
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-festival-readers-cost",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "terminal"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:terminal"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 197,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.05,
+    "data": 0.03,
+    "discovery": 0.25,
+    "fraud_protection": 0.22,
+    "objection_handling": 0.08,
+    "payments": 0.74,
+    "pricing_conversation": 0.92,
+    "security_compliance": 0.22,
+    "tax": 0.04,
+    "terminal": 0.94
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-ciso-card-data",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "objection_handling",
+    "security_compliance"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:objection_handling",
+    "skill:security_compliance"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 178,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.05,
+    "connect": 0.41,
+    "data": 0.03,
+    "discovery": 0.26,
+    "fraud_protection": 0.35,
+    "objection_handling": 0.96,
+    "payments": 0.27,
+    "pricing_conversation": 0.06,
+    "security_compliance": 0.94,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-driver-reports-cashout",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "connect",
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:connect",
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 172,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.09,
+    "connect": 0.93,
+    "data": 0.71,
+    "discovery": 0.18,
+    "fraud_protection": 0.07,
+    "objection_handling": 0.04,
+    "payments": 0.12,
+    "pricing_conversation": 0.12,
+    "security_compliance": 0.17,
+    "tax": 0.05,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-buses-route-revenue",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "data",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:data",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 221,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.1,
+    "connect": 0.07,
+    "data": 0.9,
+    "discovery": 0.24,
+    "fraud_protection": 0.05,
+    "objection_handling": 0.12,
+    "payments": 0.55,
+    "pricing_conversation": 0.16,
+    "security_compliance": 0.28,
+    "tax": 0.03,
+    "terminal": 0.53
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "ms-klarna-vip-chargebacks",
+   "arm": "decider",
+   "cell": "multi_intent_single_turn",
+   "split": "dev",
+   "skills": [
+    "fraud_protection",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 309,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.06,
+    "connect": 0.03,
+    "data": 0.05,
+    "discovery": 0.07,
+    "fraud_protection": 0.94,
+    "objection_handling": 0.11,
+    "payments": 0.57,
+    "pricing_conversation": 0.07,
+    "security_compliance": 0.21,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-bot-then-bakery",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "discovery",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:discovery",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 191,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.09,
+    "data": 0.02,
+    "discovery": 0.8,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.12,
+    "payments": 0.71,
+    "pricing_conversation": 0.05,
+    "security_compliance": 0.03,
+    "tax": 0.03,
+    "terminal": 0.13
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-designers-take-a-cut",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 199,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.09,
+    "connect": 0.92,
+    "data": 0.07,
+    "discovery": 0.07,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.07,
+    "pricing_conversation": 0.17,
+    "security_compliance": 0.1,
+    "tax": 0.06,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-zh-saas-overseas-tax",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "tax",
+    "billing"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:tax",
+    "skill:billing"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 161,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.73,
+    "connect": 0.06,
+    "data": 0.03,
+    "fraud_protection": 0.02,
+    "objection_handling": 0.05,
+    "payments": 0.45,
+    "pricing_conversation": 0.18,
+    "security_compliance": 0.15,
+    "tax": 0.95,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-taco-truck-window",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "terminal",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:terminal",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 186,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "connect": 0.04,
+    "data": 0.02,
+    "fraud_protection": 0.05,
+    "objection_handling": 0.31,
+    "payments": 0.76,
+    "pricing_conversation": 0.3,
+    "security_compliance": 0.25,
+    "tax": 0.04,
+    "terminal": 0.9
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-spikes-into-bigquery",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 332,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.08,
+    "connect": 0.04,
+    "data": 0.91,
+    "discovery": 0.12,
+    "objection_handling": 0.07,
+    "payments": 0.17,
+    "security_compliance": 0.39,
+    "tax": 0.02,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-waive-instant-fee",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "pricing_conversation",
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 175,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.4,
+    "data": 0.03,
+    "discovery": 0.05,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.63,
+    "payments": 0.11,
+    "pricing_conversation": 0.95,
+    "security_compliance": 0.08,
+    "tax": 0.03,
+    "terminal": 0.01
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-correction-we-pay-shops",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 1,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 187,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.11,
+    "connect": 0.95,
+    "data": 0.15,
+    "discovery": 0.35,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.13,
+    "pricing_conversation": 0.19,
+    "security_compliance": 0.1,
+    "tax": 0.06,
+    "terminal": 0.05
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-trade-counter-save-card",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "payments",
+    "security_compliance"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:security_compliance"
+   ],
+   "first_action_ok": false,
+   "latency_ms": 205,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.28,
+    "data": 0.07,
+    "discovery": 0.1,
+    "fraud_protection": 0.08,
+    "objection_handling": 0.05,
+    "payments": 0.61,
+    "pricing_conversation": 0.05,
+    "security_compliance": 0.59,
+    "tax": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "sm-backtest-rule",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 238,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.02,
+    "connect": 0.24,
+    "data": 0.32,
+    "discovery": 0.08,
+    "objection_handling": 0.16,
+    "payments": 0.12,
+    "pricing_conversation": 0.02,
+    "security_compliance": 0.08,
+    "tax": 0.02,
+    "terminal": 0.01
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "sm-walk-our-team-through",
+   "arm": "decider",
+   "cell": "single_intent_multi_turn",
+   "split": "dev",
+   "skills": [],
+   "skill_score": {
+    "chosen": 0,
+    "correct": 0,
+    "required": 0,
+    "found": 0
+   },
+   "first_actions": [],
+   "first_action_ok": true,
+   "latency_ms": 167,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.04,
+    "data": 0.03,
+    "discovery": 0.09,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.19,
+    "payments": 0.11,
+    "pricing_conversation": 0.06,
+    "security_compliance": 0.37,
+    "tax": 0.1,
+    "terminal": 0.01
+   },
+   "skipped": "below_threshold",
+   "error": null
+  },
+  {
+   "case_id": "mm-offtopic-then-leather",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "pricing_conversation"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 0
+   },
+   "first_actions": [
+    "skill:pricing_conversation"
+   ],
+   "first_action_ok": false,
+   "latency_ms": 230,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.07,
+    "connect": 0.1,
+    "data": 0.02,
+    "discovery": 0.48,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.63,
+    "payments": 0.59,
+    "pricing_conversation": 0.95,
+    "security_compliance": 0.08,
+    "tax": 0.03,
+    "terminal": 0.79
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-es-oxxo-boleto-impuestos",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "payments",
+    "tax"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:tax"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 258,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.11,
+    "connect": 0.12,
+    "data": 0.02,
+    "fraud_protection": 0.05,
+    "objection_handling": 0.07,
+    "payments": 0.92,
+    "pricing_conversation": 0.18,
+    "security_compliance": 0.24,
+    "tax": 0.89,
+    "terminal": 0.04
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-trial-signups-stolen-cards",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "billing"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:billing"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 182,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.89,
+    "connect": 0.03,
+    "data": 0.04,
+    "discovery": 0.07,
+    "fraud_protection": 0.89,
+    "objection_handling": 0.07,
+    "payments": 0.62,
+    "security_compliance": 0.41,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-listing-fee-and-vendor-payouts",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "connect"
+   ],
+   "skill_score": {
+    "chosen": 1,
+    "correct": 1,
+    "required": 2,
+    "found": 1
+   },
+   "first_actions": [
+    "skill:connect"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 165,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.68,
+    "connect": 0.92,
+    "discovery": 0.08,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.04,
+    "payments": 0.37,
+    "pricing_conversation": 0.56,
+    "security_compliance": 0.09,
+    "tax": 0.07,
+    "terminal": 0.03
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-one-click-and-method-report",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "payments",
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:payments",
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 245,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.04,
+    "data": 0.68,
+    "discovery": 0.06,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.06,
+    "payments": 0.78,
+    "security_compliance": 0.09,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-ca-au-bank-debits",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "pricing_conversation",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:pricing_conversation",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 280,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.04,
+    "data": 0.07,
+    "discovery": 0.06,
+    "fraud_protection": 0.04,
+    "objection_handling": 0.04,
+    "payments": 0.87,
+    "pricing_conversation": 0.93,
+    "security_compliance": 0.13,
+    "tax": 0.07,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-bank-login-and-instant-verify",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "security_compliance",
+    "payments"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:security_compliance",
+    "skill:payments"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 183,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "connect": 0.3,
+    "data": 0.03,
+    "discovery": 0.05,
+    "fraud_protection": 0.08,
+    "objection_handling": 0.06,
+    "payments": 0.72,
+    "pricing_conversation": 0.02,
+    "security_compliance": 0.87,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-dispute-analysis-selective-3ds",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "fraud_protection",
+    "data"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:fraud_protection",
+    "skill:data"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 299,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.03,
+    "connect": 0.03,
+    "data": 0.69,
+    "discovery": 0.05,
+    "fraud_protection": 0.94,
+    "objection_handling": 0.06,
+    "pricing_conversation": 0.04,
+    "security_compliance": 0.4,
+    "tax": 0.02,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-ops-meeting-dump",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "tax",
+    "security_compliance"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:tax",
+    "skill:security_compliance"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 217,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.06,
+    "data": 0.12,
+    "discovery": 0.06,
+    "fraud_protection": 0.06,
+    "objection_handling": 0.04,
+    "payments": 0.08,
+    "security_compliance": 0.88,
+    "tax": 0.94,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  },
+  {
+   "case_id": "mm-bookkeeper-quickbooks",
+   "arm": "decider",
+   "cell": "multi_intent_multi_turn",
+   "split": "dev",
+   "skills": [
+    "billing",
+    "objection_handling"
+   ],
+   "skill_score": {
+    "chosen": 2,
+    "correct": 2,
+    "required": 2,
+    "found": 2
+   },
+   "first_actions": [
+    "skill:billing",
+    "skill:objection_handling"
+   ],
+   "first_action_ok": true,
+   "latency_ms": 266,
+   "tools": null,
+   "tool_score": null,
+   "tool_latency_ms": null,
+   "paired": null,
+   "probabilities": {
+    "billing": 0.94,
+    "connect": 0.1,
+    "data": 0.03,
+    "fraud_protection": 0.03,
+    "objection_handling": 0.86,
+    "pricing_conversation": 0.13,
+    "security_compliance": 0.06,
+    "terminal": 0.02
+   },
+   "skipped": null,
+   "error": null
+  }
+ ]
+}
