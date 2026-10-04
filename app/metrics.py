@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS turn_metrics (
     primed_skills_json TEXT DEFAULT '[]',
     priming_skipped    TEXT,
     redundant_skill_calls  INTEGER DEFAULT 0,
-    skill_paired_with_tool INTEGER DEFAULT 0
+    skill_paired_with_tool INTEGER DEFAULT 0,
+    first_skills_json  TEXT DEFAULT '[]',
+    first_tools_json   TEXT DEFAULT '[]'
 )
 """
 _INDEXES = (
@@ -114,6 +116,8 @@ class TurnRecord:
     priming_skipped: str | None = None  # why nothing was primed; None when something was, or on a resumed turn
     redundant_skill_calls: int = 0  # Skill calls answered "already in context"
     skill_paired_with_tool: bool = False  # the first response loaded a skill and called a tool it informs
+    first_skills: list[str] = field(default_factory=list)  # what the first response loaded with Skill
+    first_tools: list[str] = field(default_factory=list)  # the other tools the first response called
 
 
 def record_turn(record: TurnRecord) -> None:
@@ -128,8 +132,9 @@ def record_turn(record: TurnRecord) -> None:
                 cache_hit_tokens, cache_miss_tokens, provider_calls,
                 tool_rounds, tools_json, skills_json, hooks_json, cache_hits,
                 subagent_calls, subagent_prompt_tokens, subagent_completion_tokens, latency_ms, error, kind,
-                decider_ms, primed_skills_json, priming_skipped, redundant_skill_calls, skill_paired_with_tool
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                decider_ms, primed_skills_json, priming_skipped, redundant_skill_calls, skill_paired_with_tool,
+                first_skills_json, first_tools_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.turn_id, record.session_id, record.customer_id,
@@ -142,6 +147,7 @@ def record_turn(record: TurnRecord) -> None:
                 record.latency_ms, record.error, record.kind,
                 record.decider_ms, json.dumps(record.primed_skills), record.priming_skipped,
                 record.redundant_skill_calls, int(record.skill_paired_with_tool),
+                json.dumps(record.first_skills), json.dumps(record.first_tools),
             ),
         )
         conn.commit()

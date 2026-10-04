@@ -22,6 +22,7 @@ fails startup rather than a customer conversation.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -194,6 +195,15 @@ def skill_already_in_context(ctx: ToolUseContext) -> Replace | None:
         return None
     ctx.turn.redundant_skill_calls += 1
     return Replace(ToolResult(content=ALREADY_IN_CONTEXT.format(name=name)))
+
+
+def requested_skill(arguments: str) -> str:
+    """The skill a `Skill` call asks for, from its raw arguments; "?" when they do not name one."""
+    try:
+        name = json.loads(arguments).get("name")
+    except (TypeError, ValueError, AttributeError):
+        return "?"
+    return str(name) if name else "?"
 
 
 def skill_paired_with_tool(call_names: list[str]) -> bool:

@@ -61,6 +61,7 @@ from app.harness.skills import (
     UNINFORMED_TOOLS,
     Skill,
     primed_message,
+    requested_skill,
     skill_paired_with_tool,
     skills_in_context,
 )
@@ -381,15 +382,8 @@ def _decide_by_decider(case: GoldenCase, arm: Arm, harness: Any, decider: Decide
     )
 
 
-def _skill_name(call: Any) -> str:
-    try:
-        return str(json.loads(call.arguments).get("name"))
-    except (TypeError, ValueError, AttributeError):
-        return "?"
-
-
 def _loaded_skills(completion: Completion) -> list[str]:
-    return _unique(_skill_name(c) for c in completion.tool_calls if c.name == "Skill")
+    return _unique(requested_skill(c.arguments) for c in completion.tool_calls if c.name == "Skill")
 
 
 def _answers(completion: Completion, case: GoldenCase, harness: Any, customer_id: str | None) -> list[dict[str, Any]]:
@@ -401,7 +395,7 @@ def _answers(completion: Completion, case: GoldenCase, harness: Any, customer_id
     out = []
     for call in completion.tool_calls:
         if call.name == "Skill":
-            name = _skill_name(call)
+            name = requested_skill(call.arguments)
             if name in in_context:
                 content = ALREADY_IN_CONTEXT.format(name=name)
             elif name in harness.skills:

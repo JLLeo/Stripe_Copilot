@@ -561,13 +561,20 @@ older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the sche
 average latency, average prompt / completion / reasoning tokens, total cache hit and
 miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits,
 provider calls per turn, sub-agent delegations and tokens, handoffs confirmed and
-declined, leads captured, and reflection passes; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON. Rows have a `kind`: `turn`, or `session_end` for a reflection pass, which carries sub-agent tokens only and is left out of the per-turn averages. Prompt-cache hit rate is a
+declined, leads captured, and reflection passes; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON.
+
+Each row also records what Priming did and how the turn began. Priming's columns are the
+Decider's time, the skills primed, why nothing was primed, and the redundant `Skill`
+calls. The first response gets three: whether it paired a `Skill` call with a tool that
+skill informs, the skills it loaded and the other tools it called. From those, an
+evaluation can tell a round that bought nothing (skills loaded, nothing informed called)
+from one that did real work. Rows have a `kind`: `turn`, or `session_end` for a reflection pass, which carries sub-agent tokens only and is left out of the per-turn averages. Prompt-cache hit rate is a
 first-class number because the prefix discipline in ADR 0005 is easy to break by
 accident and this is where a break shows first.
 
 ## Testing
 
-242 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~30 s. The app under test
+283 tests, no network, one temp runtime database and one temp Milvus Lite index per run, ~30 s. The app under test
 always starts with a harness over a `ScriptedProvider` and a `ScriptedDecider` (installed by `conftest.py`), so
 the suite runs with no `.env` and no keys. The 19 evaluation cases carry the `eval`
 marker and are deselected by default (`addopts = -m "not eval"`).
@@ -712,6 +719,46 @@ report that states a conclusion is generated from the numbers.
   would have ranked above it. A test checks that the shipped defaults equal this choice on
   the committed reports, and the command exits non-zero when they do not.
 
+### The verdict — `evals/verdict.py`
+
+`python -m evals.verdict` reads the behaviour-case runs made for the verdict, together with
+the four-arm Golden Set runs. Three were made with Priming off and two on at the defaults;
+a third run with Priming on was lost to the provider account's balance. It
+writes `priming-verdict.md` and its JSON, and refuses runs that were not made at the
+configured defaults.
+
+- **Quality.** It reuses `thresholds.quality()`: each run with Priming on against the noise
+  of the runs with it off, plus the pooled means.
+- **The claims, turn by turn.** A turn is keyed by its case and position, so a customer
+  message is compared with itself across runs.
+  - A `Skill` call in a primed turn's first response is classed as a reload of a primed
+    skill (Priming paid for and not used) or a load of one Priming missed (the fallback).
+  - Tool rounds are compared where most off runs had a round that bought nothing and most
+    on runs primed.
+  - The Decider's p95 covers every turn it was asked about.
+  - "Slower" is reported by median, and in every run (every run with Priming on slower
+    than every run without), against how many such turns chance gives for this many runs:
+    1 / C(n + m, n) per turn, with a Poisson tail. Each such turn is listed with what
+    Priming did there, including a turn that lost a round and was still slower.
+- **Speed and rounds.** `two_level()` gives the per-turn change, on minus off, with an
+  interval that resamples the runs of each mode as well as the turns. Whole runs drift
+  with the provider's speed, and a turns-only interval would read that drift as certainty.
+  Faster means the whole interval is below zero. The same comparison is made where a
+  skill-only round went and on the other turns, and `runs_needed()` says how many runs a
+  side would separate a change of the measured size.
+- **The numbers.** Turn and case p50 and p90 (#14 stated its baseline per case), the first
+  turns pairing a `Skill` call with a tool, per run (#14 counted 6 of 19), how many
+  first-action passes rest on Priming's credit, the share primed and skip reasons, and the
+  share of primed turns asking again for a skill in context. That share raises a finding
+  at a quarter.
+- **The next lever.** `next_lever()` reads the Golden Set's arms. An arm qualifies when its
+  skill F1 is within the Golden Set's run-to-run spread of today's and it decides faster.
+  Its saving is projected as its time saved per decision times the model calls per turn.
+- **One set of statuses.** Quality is held, degraded or incomplete; speed is faster, slower
+  or not established; rounds are fewer or not. `headline()` and `recommendation()` both
+  read those, so the report cannot recommend what its headline rules out. A test renders
+  the committed runs and checks the committed report matches.
+
 The behaviour-case runner supports this. `run_case()` reads each turn's row from
 `turn_metrics` (rounds, latency, primed skills, Decider time, redundant `Skill` calls) and
 counts a primed skill as a first action. That makes first-action accuracy a check that the
@@ -735,7 +782,8 @@ judge; September 2026. The README tells each story; the numbers:
 | Evaluation suite (`evals/reports/latest.md`) | first-action accuracy 19/19, leak-free 19/19, both refusals confirmed, mean judge score 4.5 / 5, 6 min 49 s |
 | Golden Set, skill selection (`evals/reports/golden-dev.md` / `golden-test.md`, October 2026) | exact set and F1: thinking on 92% / 75% and 97% / 89% at p50 3.0 / 2.8 s; thinking off 50% / 52% and 64% / 73% at 1.9 / 1.8 s; `deepseek-flash` 85% / 92% and 94% / 97% at 2.0 / 1.9 s; Decider 70% / 68% and 83% / 85% at 0.20 / 0.18 s |
 | Priming's threshold (`evals/reports/priming-thresholds.md`, held-out split) | shipped 0.55 / 0.20, top two within the margin: exact set 80%, recall 91%, 18 of 22 skill rounds saved, 4 wrong primes; before #18 68%, 79%, 14 of 22. Behaviour cases: tool rounds 41–44 → 25–29 over 25 turns, turn p50 12.7 → 11.3 s, quality within noise |
-| Unit suite | 242 tests, no network, ~30 s; 19 evaluation cases deselected by default |
+| The Priming verdict (`evals/reports/priming-verdict.md`, three runs off, two on) | quality held (first action 98% → 100%, judge 4.26 → 4.38, no leaks); tool rounds −0.64 per turn (95% −0.97 to −0.29); turn latency −1.6 s per turn (95% −4.1 to +0.9), not established — about 5 runs a side would settle it; no reloaded primed skill; first turns pairing `Skill` with a tool 3, 2, 5 of 19 off, 0 on; Decider p95 0.3 s; next lever: `deepseek-flash` (skill F1 96% vs 93%, 0.9 s faster to decide, ~1.5 s a turn), not thinking off |
+| Unit suite | 283 tests, no network, ~30 s; 19 evaluation cases deselected by default |
 
 The knowledge index holds 177 public chunks from 18 documents in two Milvus Lite
 collections (dense + BM25); the three internal documents are never opened past their

@@ -1,0 +1,281 @@
+{
+ "off_runs": [
+  "verdict-off-1",
+  "verdict-off-2",
+  "verdict-off-3"
+ ],
+ "on_runs": [
+  "verdict-on-1",
+  "verdict-on-3"
+ ],
+ "priming": {
+  "threshold": 0.55,
+  "margin": 0.2,
+  "decider": "jev-latest"
+ },
+ "quality": {
+  "first_action": {
+   "off": 0.9824561403508771,
+   "on": 1.0
+  },
+  "first_action_credit": {
+   "passes": 38,
+   "decided_by_priming": 27
+  },
+  "judge": {
+   "off": 4.2631578947368425,
+   "on": 4.381578947368421
+  },
+  "leaks": {
+   "off": 0,
+   "on": 0
+  },
+  "errored_runs": [],
+  "runs_outside_noise": [],
+  "noise": {
+   "judge": 0.23684210526315752,
+   "first_action": 0.052631578947368474,
+   "p50_ms": 3217,
+   "p90_ms": 10057
+  },
+  "status": "held"
+ },
+ "claims": {
+  "first_response": {
+   "primed_turns": 38,
+   "with_skill_call": 0,
+   "reloaded_a_primed_skill": 0,
+   "loaded_a_skill_priming_missed": 0,
+   "held": true
+  },
+  "rounds": {
+   "turns": 13,
+   "dropped_by_one_or_more": 10,
+   "mean_drop": 1.1538461538461537,
+   "held": true
+  },
+  "decider": {
+   "asked": 50,
+   "p50_ms": 201,
+   "p95_ms": 258,
+   "max_ms": 284,
+   "held": true
+  },
+  "slower": {
+   "matched": 25,
+   "slower_by_median": 9,
+   "slower_in_every_run": [
+    {
+     "case": "fraud_chargebacks",
+     "turn": 1,
+     "off_ms": [
+      10137,
+      10945,
+      13906
+     ],
+     "on_ms": [
+      15155,
+      24642
+     ],
+     "decider_ms": [
+      255,
+      211
+     ],
+     "off_rounds": [
+      2,
+      3,
+      2
+     ],
+     "on_rounds": [
+      1,
+      2
+     ],
+     "primed": [
+      [
+       "fraud_protection"
+      ],
+      [
+       "fraud_protection"
+      ]
+     ],
+     "fewer_rounds_yet_slower": true
+    },
+    {
+     "case": "tax_cross_border",
+     "turn": 2,
+     "off_ms": [
+      15000,
+      16100,
+      19325
+     ],
+     "on_ms": [
+      20517,
+      21019
+     ],
+     "decider_ms": [
+      198,
+      199
+     ],
+     "off_rounds": [
+      1,
+      2,
+      1
+     ],
+     "on_rounds": [
+      1,
+      3
+     ],
+     "primed": [
+      [],
+      []
+     ],
+     "fewer_rounds_yet_slower": false
+    }
+   ],
+   "expected_by_chance": 2.500000000000001,
+   "chance_p": 0.7127025048163544,
+   "held": true
+  }
+ },
+ "speed": {
+  "latency": {
+   "turns": 25,
+   "delta": -1589.5999999999997,
+   "low": -4067.16,
+   "high": 869.0733333333333,
+   "decided": true
+  },
+  "rounds": {
+   "turns": 25,
+   "delta": -0.64,
+   "low": -0.9733333333333334,
+   "high": -0.2933333333333333,
+   "decided": true
+  },
+  "where_a_round_went": {
+   "turns": 13,
+   "delta": -1233.6666666666667,
+   "low": -4259.205128205128,
+   "high": 2187.230769230769,
+   "decided": true
+  },
+  "elsewhere": {
+   "turns": 12,
+   "delta": -1975.1944444444437,
+   "low": -5655.8472222222235,
+   "high": 823.8611111111112,
+   "decided": true
+  },
+  "run_means_ms": {
+   "off": [
+    12973.88,
+    14795.16,
+    15799.96
+   ],
+   "on": [
+    13071.68,
+    12795.12
+   ]
+  },
+  "runs_needed": 5,
+  "faster": false,
+  "slower": false,
+  "fewer_rounds": true
+ },
+ "latency": {
+  "turn": {
+   "off": {
+    "turns": 75,
+    "p50_ms": 13514,
+    "p90_ms": 25795
+   },
+   "on": {
+    "turns": 50,
+    "p50_ms": 11365,
+    "p90_ms": 24341
+   }
+  },
+  "case": {
+   "off": {
+    "cases": 57,
+    "p50_ms": 15732,
+    "p90_ms": 37588
+   },
+   "on": {
+    "cases": 38,
+    "p50_ms": 12106,
+    "p90_ms": 36683
+   }
+  },
+  "turn_p50_spread_off_ms": 3217,
+  "turn_p90_spread_off_ms": 10057
+ },
+ "paired_first_turns": {
+  "off": [
+   3,
+   2,
+   5
+  ],
+  "on": [
+   0,
+   0
+  ]
+ },
+ "priming_use": {
+  "turns": 50,
+  "primed": 38,
+  "share_primed": 0.76,
+  "skip_reasons": {
+   "below_threshold": 12
+  },
+  "primed_turns_asking_again": 0,
+  "asking_again_rate": 0.0,
+  "alarm": false
+ },
+ "arms": {
+  "main-thinking": {
+   "f1": 0.933327605464387,
+   "recall": 0.8776467029643074,
+   "p50_ms": 2893,
+   "tool_recall": 0.6566666666666666
+  },
+  "main-no-thinking": {
+   "f1": 0.6843137254901961,
+   "recall": 0.5222323049001815,
+   "p50_ms": 1865,
+   "tool_recall": 0.3055555555555556
+  },
+  "sub-model": {
+   "f1": 0.9580599923814508,
+   "recall": 0.9479733817301875,
+   "p50_ms": 1973,
+   "tool_recall": 0.6855555555555556
+  },
+  "decider": {
+   "f1": 0.8406610661851299,
+   "recall": 0.7826678765880217,
+   "p50_ms": 187.5,
+   "tool_recall": null
+  }
+ },
+ "next_lever": {
+  "candidates": {
+   "main-no-thinking": {
+    "f1_gap": 0.2490138799741909,
+    "faster_ms": 1028,
+    "viable": false,
+    "turn_saving_ms": 1706.48,
+    "projected_p50_ms": 9658.52
+   },
+   "sub-model": {
+    "f1_gap": -0.02473238691706381,
+    "faster_ms": 920,
+    "viable": true,
+    "turn_saving_ms": 1527.1999999999998,
+    "projected_p50_ms": 9837.8
+   }
+  },
+  "recommended": "sub-model"
+ },
+ "calls_per_turn_on": 1.66
+}

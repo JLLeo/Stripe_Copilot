@@ -109,13 +109,14 @@ stripe-sales-copilot/
 ├── skills/<name>/SKILL.md    # 11 skills: 7 product, 4 conversation (discovery, pricing, security, objections)
 ├── knowledge_base/           # Public + internal product docs, knowledge graph
 ├── milvus.db/                # Milvus Lite: 177 public chunks × 2 collections (dense, BM25)
-├── tests/                    # 242 tests, no network, ~30s (builds a real Milvus Lite fixture); + 19 eval cases on demand
+├── tests/                    # 283 tests, no network, ~30s (builds a real Milvus Lite fixture); + 19 eval cases on demand
 ├── evals/
 │   ├── cases/*.yaml          # 19 customer-viewpoint sessions: expected first action, expectations, rubric
 │   ├── runner.py             # Recorder over the provider, first-action reading, deepseek-flash judge, zero-leak, report
 │   ├── golden/*.yaml         # the Golden Set: 80 labelled turns in four cells, 40 development / 40 held-out
 │   ├── golden.py             # `python -m evals.golden`: four arms decide which skills each turn needs, scored
 │   ├── thresholds.py         # `python -m evals.thresholds`: Priming's threshold and margin, fitted on dev, published on held-out
+│   ├── verdict.py            # `python -m evals.verdict`: faster without being worse? Turn by turn, Priming off against on
 │   └── reports/              # latest.md (the last `pytest -m eval` run), the Golden Set runs, the behaviour runs behind
 │                             #   the threshold fit, and priming-thresholds.md; each with a JSON twin
 ├── docs/adr/                 # Six architecture decision records
@@ -198,7 +199,7 @@ session id lives in `localStorage` per customer, so a reload continues the sessi
 ## Testing
 
 ```bash
-pytest            # 242 tests in ~30s; no model calls; temp runtime DB and a temp Milvus Lite index
+pytest            # 283 tests in ~30s; no model calls; temp runtime DB and a temp Milvus Lite index
 pytest -m eval    # the evaluation suite: 19 sessions against DeepSeek, ~5 min, needs .env
 ```
 
@@ -223,6 +224,7 @@ what the customer block contained, that no timestamp leaked into the cached pref
 | `tests/test_providers.py` | The Provider seam: scripted playback, deterministic embeddings, DeepSeek stream accumulation and request shape, the request timeout |
 | `tests/test_eval_runner.py` | The evaluation runner on the scripted provider: the case set covers every skill, clarifying questions, both handoff triggers and the enterprise override, prospect discovery and refusal; actions are read off recorded completions and only the main model's count; a case checks first action, within-turn and within-session expectations, the handoff team, a refusal where one is expected, and leaks, and judges every reply; the judge's JSON is found among prose; each turn's rounds, latency and primed skills, with a primed skill counted as a first action; the summary and the report, incomplete runs and table cells included |
 | `tests/test_eval.py` | `pytest -m eval` — see Evaluation |
+| `tests/test_verdict.py` | The Priming verdict: a `Skill` call on a primed turn told apart from a reload; rounds compared only where a round bought nothing and Priming primed; the Decider's time where it was asked; slower turns by median and in every run, against a Poisson chance baseline; speed and rounds by a two-level bootstrap, so a drift between runs is not a speed change; runs needed from the spread between runs; case latency, pairing per run, the first-action passes Priming's credit decided; skip reasons and the asking-again alarm; the next lever with its projected saving; the headline and the recommendation never contradicting each other, for every status; the verdict end to end — rounds away with latency undecided, faster, worse, errored; the committed report equal to what the committed runs give; the command refusing runs not made at the defaults |
 | `tests/test_thresholds.py` | Fitting Priming's threshold: only required and unwanted skills calibrate; reliability and ECE; a log-odds shift fitted toward the truth and shrunk toward zero; a correction only when skills differ from one another; the rule before #18 against the production rule; rounds saved only when every required skill was primed on a skill-only baseline round; the curve and its tie-breaks; quality judged against the noise of two runs with Priming off; published figures from the held-out split at the shipped values |
 | `tests/test_golden.py` | The Golden Set runner on both fakes: the 80 cases in four even cells with every skill required in both splits; a malformed case file reports every problem at once; the two layers and required alternatives; a model arm's skill decision from its first response and its tool decision with the instructions in hand (a follow-up after skill loads or a profile read, which runs for real, while `remember` writes nothing); every model arm on the same bytes; a fixed prior Working Memory with no fabricated tool call; the Decider arm through the production Priming code with every probability kept; abstaining and failing Deciders; micro-averaged numbers per arm and cell; the report and its JSON twin; the command refusing an unknown arm or a Decider without its key |
 | `tests/test_database.py` | Seed / runtime split, read-only seed, append-only messages |
@@ -412,6 +414,60 @@ this change, so the comparison does not depend on rerunning anything.
 
 To run several behaviour runs at once, give each its own copy of `milvus.db` through
 `HARNESS_MILVUS_URI`, because Milvus Lite locks the file.
+
+### The Priming verdict
+
+```bash
+EVAL_REPORT=verdict-off-1 pytest -m eval                  # the behaviour cases, Priming off (three runs)
+EVAL_REPORT=verdict-on-1 HARNESS_PRIMING=1 pytest -m eval   # and on at the fitted defaults
+python -m evals.verdict                                   # → evals/reports/priming-verdict.md
+```
+
+[`priming-verdict.md`](evals/reports/priming-verdict.md) answers one question: did
+Priming make the agent faster without making it worse? It is measured the same way
+before and after, on three runs with Priming off and two with it on. A third run with it
+on was lost when the provider account ran out of balance. Each turn is compared with
+itself across runs. Whole runs also differ from one another, because the provider is
+faster at some hours than others, so every interval resamples the runs as well as the
+turns. The headline and the recommendations are computed from the same statuses, so the
+report cannot recommend what its headline rules out.
+
+**Priming kept quality and took about a third of the tool rounds away. Whether that made
+turns faster is inside the runs' own variation.**
+
+- **Quality held.** First-action accuracy was 98% off and 100% on; the judge's mean was
+  4.26 off and 4.38 on; nothing leaked. Every run with Priming on is within the noise of
+  the runs with it off. With Priming on, a primed skill counts as the first move, and 27
+  of the 38 passes rest on that credit: that row says the right skill got in first, and
+  the judge says what the model did with it.
+- **Every committed claim held.**
+  - No primed turn's first response reloaded a primed skill.
+  - Where the first round only loaded skills, a round went away: 1.2 rounds on average
+    over 13 such turns, a full round on 10 of them.
+  - The Decider's p95 was 0.3 s.
+  - Two turns were slower in every run, where chance alone gives 2.5 for this many runs.
+    With two runs on, that test only catches a slowdown on many turns.
+- **Rounds fell; latency is not established.** Per turn, tool rounds changed by −0.64
+  (95% −0.97 to −0.29). Latency changed by −1.6 s (95% −4.1 to +0.9). Mean turn latency
+  per run was 13.0, 14.8 and 15.8 s off, and 13.1 and 12.8 s on. At that spread, about 5
+  runs a side would separate a change of 1.6 s. The turns that lost a skill-only round
+  saved no more than the others, so these runs cannot tie a latency change to the round
+  that went.
+- **Pooled percentiles do not settle #14's expectation.** #14 expected p90 to improve and
+  p50 to stay. Turn p50 went from 13.5 s to 11.4 s and p90 from 25.8 s to 24.3 s, but the
+  runs with Priming off disagree by 3.2 s at p50 and 10.1 s at p90.
+- **Priming is used.** No primed turn asked again for a skill already in context. First
+  turns pairing a `Skill` call with a tool it informs ran 3, 2 and 5 of 19 per run with
+  Priming off (#14 counted 6) and 0 with it on. 76% of turns were primed; the rest were
+  below the threshold.
+- **Priming can be turned on** (`HARNESS_PRIMING=1`); it stays off by default until that
+  is decided.
+- **The next lever is the cheaper model, not thinking off.** On the Golden Set,
+  `deepseek-flash` picks skills as well as the main model with thinking on (F1 96% against
+  93%) and decides 0.9 s faster. Turning thinking off loses 25 points of F1. At 1.7 model
+  calls a turn, that is about 1.5 s a turn, a turn p50 near 9.8 s: short of the 6 s #14
+  aimed at, on its own. Evaluating the cheaper model as the main model is the recommended
+  next step; adopting it is a separate decision.
 
 ## Skills and tools
 

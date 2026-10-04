@@ -47,7 +47,15 @@ from app.harness.provider import (
     ToolCall,
     Usage,
 )
-from app.harness.skills import Skill, load_skills, register_skill_tool, skill_paired_with_tool, skills_in_context, skills_index
+from app.harness.skills import (
+    Skill,
+    load_skills,
+    register_skill_tool,
+    requested_skill,
+    skill_paired_with_tool,
+    skills_in_context,
+    skills_index,
+)
 from app.harness.subagent import SubagentMetering
 from app.harness.tools import EndTurn, ToolContext, ToolRegistry, ToolResult
 from app.metrics import TurnRecord, record_turn
@@ -122,7 +130,7 @@ class HarnessConfig:
     recent_window_tokens: int = 24_000  # kept verbatim through a compaction
     # Priming (#14). The Decider answers one yes/no question per Skill before the first model call of
     # a turn; what it names is added to the context and nothing is ever taken away from the model.
-    priming: bool = False  # off until the Golden Set's verdict (#19); HARNESS_PRIMING=1 turns it on
+    priming: bool = False  # off by default; evals/reports/priming-verdict.md is the case for turning it on (HARNESS_PRIMING=1)
     decider_model: str = "jev-latest"
     decider_timeout_seconds: float = 0.7  # the vendor reports p95 354 ms; past this the turn goes on without it
     # Fitted in #18 on the Golden Set's development split, checked on the behaviour cases (evals/reports/priming-thresholds.md).
@@ -210,6 +218,8 @@ class _Books:
     subagent_prompt_tokens: int = 0
     subagent_completion_tokens: int = 0
     skill_paired_with_tool: bool = False  # the turn's first response loaded a skill and called a tool it informs
+    first_skills: list[str] = field(default_factory=list)  # the skills the first response loaded
+    first_tools: list[str] = field(default_factory=list)  # the other tools it called
 
     def add_subagent(self, metering: SubagentMetering) -> None:
         self.subagent_calls += 1  # one delegation, however many rounds it took
@@ -431,6 +441,7 @@ class Harness:
                 priming_skipped=priming_books.skipped,
                 redundant_skill_calls=turn.redundant_skill_calls,
                 skill_paired_with_tool=books.skill_paired_with_tool,
+                first_skills=books.first_skills, first_tools=books.first_tools,
             ))
 
         try:
@@ -463,7 +474,10 @@ class Harness:
                 books.usage = books.usage + completion.usage
                 books.model = completion.model or books.model
                 if first_response:
-                    books.skill_paired_with_tool = skill_paired_with_tool([c.name for c in completion.tool_calls])
+                    names = [c.name for c in completion.tool_calls]
+                    books.skill_paired_with_tool = skill_paired_with_tool(names)
+                    books.first_skills = [requested_skill(c.arguments) for c in completion.tool_calls if c.name == "Skill"]
+                    books.first_tools = [n for n in names if n != "Skill"]
                     first_response = False
                 if completion.usage.prompt_tokens:
                     database.set_last_prompt_tokens(session_id, completion.usage.prompt_tokens)

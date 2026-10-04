@@ -102,6 +102,7 @@ def test_run_case_checks_first_action_within_turn_handoff_and_leaks(client, prov
     assert result.within_ok and result.handoff_ok and result.handoff_team == "Deal Desk / Pricing"
     (turn,) = result.turns
     assert turn["tool_rounds"] == 2 and turn["primed_skills"] == [] and turn["priming_skipped"] == "priming_off"
+    assert turn["first_skills"] == ["pricing_conversation"] and turn["first_tools"] == []
     assert result.leaks == [] and result.leak_free
     assert result.judge_score == 4 and "pricing team" in result.judge_reason
     assert len(result.replies) == 1 and result.latency_ms >= 0

@@ -29,6 +29,7 @@ import yaml
 from app import database
 from app.harness.guardrails import find_placeholders, leaks
 from app.harness.provider import Completed, Completion, CompletionRequest, Provider, StreamEvent, drain
+from app.harness.skills import requested_skill
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 REPORTS_DIR = Path(__file__).resolve().parent / "reports"
@@ -147,10 +148,7 @@ def actions_of(completion: Completion) -> list[str]:
     out: list[str] = []
     for call in completion.tool_calls:
         if call.name == "Skill":
-            try:
-                out.append("skill:" + str(json.loads(call.arguments).get("name")))
-            except (TypeError, ValueError):
-                out.append("skill:?")
+            out.append("skill:" + requested_skill(call.arguments))
         else:
             out.append(NAMED_ACTIONS.get(call.name, "tool:" + call.name))
     return out
@@ -287,6 +285,8 @@ def turn_metrics(turn_id: str) -> dict[str, Any]:
     out = {key: row[key] for key in _TURN_FIELDS}
     out["primed_skills"] = json.loads(row["primed_skills_json"] or "[]")
     out["skill_paired_with_tool"] = bool(row["skill_paired_with_tool"])
+    out["first_skills"] = json.loads(row["first_skills_json"] or "[]")
+    out["first_tools"] = json.loads(row["first_tools_json"] or "[]")
     return out
 
 

@@ -438,7 +438,10 @@ def test_a_first_response_pairing_a_skill_with_an_informed_tool_is_counted(clien
     for i, (specs, expected) in enumerate(cases):
         provider.script(_calls(*specs), "ok")
         _chat(client, f"s{i}", "q")
-        assert _metrics(f"s{i}")["skill_paired_with_tool"] == expected, specs
+        m = _metrics(f"s{i}")
+        assert m["skill_paired_with_tool"] == expected, specs
+        assert json.loads(m["first_skills_json"]) == [a["name"] for n, a in specs if n == "Skill"], "what the first response loaded"
+        assert json.loads(m["first_tools_json"]) == [n for n, _ in specs if n != "Skill"], "and what else it called"
 
 
 # =========================================================================
