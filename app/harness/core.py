@@ -132,7 +132,7 @@ class HarnessConfig:
     # a turn; what it names is added to the context and nothing is ever taken away from the model.
     priming: bool = False  # off by default; evals/reports/priming-verdict.md is the case for turning it on (HARNESS_PRIMING=1)
     decider_model: str = "jev-latest"
-    decider_timeout_seconds: float = 0.7  # the vendor reports p95 354 ms; past this the turn goes on without it
+    decider_timeout_seconds: float = 0.7  # measured p95 258 ms over 50 asks (#19); past this the turn goes on without it
     # Fitted in #18 on the Golden Set's development split, checked on the behaviour cases (evals/reports/priming-thresholds.md).
     priming_threshold: float = 0.55
     priming_margin: float = 0.20  # with three or more above the threshold, how far below the top the second may be

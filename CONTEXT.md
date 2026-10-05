@@ -13,12 +13,15 @@ domain it serves.
 **Harness**:
 The hand-built runtime that composes the model's prompt, runs the model, dispatches
 the tool calls it makes, fires hooks around them, and manages the conversation's
-context. The harness never decides *what* to do; the model does.
+context. The harness never decides *what* to do; the model does. With Priming, a second
+model, the Decider, chooses which Skills' instructions the model starts a Turn with —
+context, never an action.
 _Avoid_: pipeline, graph, agent loop (as a name for the whole runtime)
 
 **Turn**:
 One customer message and everything the harness does until the model's reply is
-final: any number of tool calls, hook firings, and skill loads.
+final: Priming when it is on, then any number of tool calls, hook firings, and skill
+loads.
 _Avoid_: query, request, iteration
 
 **Guardrail**:

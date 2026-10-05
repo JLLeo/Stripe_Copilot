@@ -12,6 +12,11 @@ propose a handoff); deterministic code only validates or constrains those choice
 guardrails — permission gates, evidence checks, output validators, context budgets.
 No rule may select an action on the model's behalf.
 
+*Amended by ADR 0007:* with Priming on, a second model — the Decider — may put a Skill's
+instructions into context before the main model's first call. That is a model's judgment,
+not a rule, and it only adds: the main model can still load any Skill and still chooses
+every action.
+
 ## Consequences
 
 - Every turn costs at least one model call carrying the full tool and skill index;

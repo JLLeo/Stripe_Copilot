@@ -11,7 +11,10 @@ given a fixed-order prompt and asked to reply; the harness around it builds the
 request, streams the answer, appends both sides to working memory, and records what
 the turn cost. There is no intent classifier, no scenario router, and no forced tool
 call anywhere in the path — the model decides, deterministic code guards
-([ADR 0001](docs/adr/0001-model-decides-guardrails-constrain.md)).
+([ADR 0001](docs/adr/0001-model-decides-guardrails-constrain.md)). With Priming on, a
+second, faster model — the Decider — names the skills a turn calls for before the first
+call. Their bodies are added to the conversation and nothing is taken away from the model
+([ADR 0007](docs/adr/0007-a-decider-primes-the-skills-a-turn-calls-for.md)).
 
 ```
 HTTP (FastAPI)                 Harness                                        Provider
@@ -20,9 +23,9 @@ POST /sales-agent/stream ──►  run_turn(session, customer, msg)
                                ├─ load_session ─ or ─ SessionStart hooks ─► customer block (profile + memory)
                                ├─ settle a dangling handoff · relieve pressure (clear, compact) if the last
                                │   response was over the high-water mark ─► SSE context_relieved
-                               ├─ a long message ─► attachment; a stub takes its place
                                ├─ Priming (when on): the Decider names skills ─► their bodies as one
                                │   system message before the customer's ─► SSE primed
+                               ├─ a long message ─► attachment; a stub takes its place
                                ├─ assemble: [static system][customer block][working memory][user] + tools
                                ├─ loop:
                                │   provider.complete(request) ────────────────────────► DeepSeek (stream)
@@ -63,13 +66,19 @@ synchronous endpoint, keeps only the last one.
 2. **Context relief.** If the previous response reported prompt tokens at or above the
    high-water mark, spent tool results are cleared and, if that is not enough, working
    memory is compacted (see Context Budget below). Nothing happens otherwise.
-3. **Request assembly** in the fixed order — see below. A customer message over the
+3. **Priming** (when `priming` is on; see Priming below). The Decider is asked, in one
+   request, one yes/no question per skill whose body is not in working memory. The skills
+   it names with enough confidence go in as one `system` message just before the
+   customer's message, persisted with the turn and announced as `primed`. If nothing is
+   named, or anything fails, the turn runs exactly as it would without Priming, and the
+   reason is recorded.
+4. **Request assembly** in the fixed order — see below. A customer message over the
    attachment threshold is stored as an Attachment and a stub takes its place in working
    memory; `TurnState.customer_message` still carries the whole text for the guardrails.
-4. **Completion.** The Provider streams; the first reasoning delta is announced once
+5. **Completion.** The Provider streams; the first reasoning delta is announced once
    as `thinking`, text deltas are **held**, and the final `Completed` event carries usage
-   and any tool calls. Held text is released only once the Stop hooks approve it (step 5).
-5. **Tool rounds.** While the reply carries tool calls, each call goes through the
+   and any tool calls. Held text is released only once the Stop hooks approve it (step 7).
+6. **Tool rounds.** While the reply carries tool calls, each call goes through the
    `PreToolUse` hooks (allow, deny with feedback, replace with a cached result, or
    pause), the tool runs, the `PostToolUse` hooks may rewrite the result, and a `tool`
    message is appended; then the model is called again with everything so far. A round
@@ -80,21 +89,22 @@ synchronous endpoint, keeps only the last one.
    call: the remaining calls of the round get a "not run" result, the messages so far are
    appended, and `done` carries the question for the customer; the paused call's result
    arrives with their answer (see Handoff).
-6. **Stop hooks.** When the reply carries no tool calls, `anti_placeholder` and
+7. **Stop hooks.** When the reply carries no tool calls, `anti_placeholder` and
    `internal_canary` inspect it. A `Deny` sends the draft back to the model — draft and
    feedback are appended to the request as an assistant and a user message, but not to
    working memory — and the loop runs again; after two rewrites a fixed safe reply
    replaces the draft. Only an approved (or safe) reply is streamed, in one burst. Text the
    model wrote beside a handoff proposal is checked the same way when the turn pauses; if
    it fails, the harness's own proposal wording stands in.
-7. **Working memory.** The customer message and every assistant and tool message of
-   the turn (assistant rows with their `reasoning_content`, which DeepSeek requires
+8. **Working memory.** The primed message if there is one, the customer message and
+   every assistant and tool message of the turn (assistant rows with their `reasoning_content`, which DeepSeek requires
    back whenever `tools` are present) are appended as `messages` rows. Nothing is
    ever updated.
-8. **Metrics.** One `TurnRecord`: model, prompt/completion/reasoning tokens summed over
+9. **Metrics.** One `TurnRecord`: model, prompt/completion/reasoning tokens summed over
    the turn's rounds, `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, provider
    calls, tool rounds, tools called, skills loaded, hook outcomes, tool-cache hits,
-   latency, error.
+   latency, error. It also records what Priming did and what the first response asked
+   for (see Observability).
 
 A provider failure — after the client library's own retries — ends the turn with an
 `error` event carrying a fixed friendly message, records the turn with the error
@@ -106,9 +116,13 @@ If the customer disconnects mid-reply the turn is still metered (error
 `max_tokens`, `thinking`, `skills_dir`, `tool_round_budget`, `subagent_max_rounds`,
 `result_cap_chars`, `tool_cache_ttl_seconds`, `memory_limit`, `milvus_uri`, and the context
 thresholds `turn_result_budget_chars`, `attachment_threshold_chars`, `context_budget_tokens`,
-`high_water`, `low_water`, `summary_max_tokens`, `recent_window_tokens`) is read from `HARNESS_*`
-environment variables and validated once: `0 < low_water < high_water <= 1`, and the summary
-plus the recent window fit under the low-water mark. Session binding is strict: an unknown
+`high_water`, `low_water`, `summary_max_tokens`, `recent_window_tokens`, and Priming's
+`priming` (off), `decider_model` (`jev-latest`), `decider_timeout_seconds` (0.7),
+`priming_threshold` (0.55) and `priming_margin` (0.20)) is read from `HARNESS_*`
+environment variables and validated once: `0 < low_water < high_water <= 1`, the summary
+plus the recent window fit under the low-water mark, `0 < priming_threshold <= 1`,
+`0 <= priming_margin < 1`, and the Decider's timeout is positive. The Decider's key is
+`TYPESAFE_API_KEY`, read by its adapter like `DEEPSEEK_API_KEY`. Session binding is strict: an unknown
 `customer_id` is refused (HTTP 404) rather than downgraded to a prospect, and a session
 never switches customer (HTTP 409).
 
@@ -121,7 +135,7 @@ Every request is built in this order and only this order:
 | `messages[0]` system | **Static prompt**: role, conduct (mirror the customer's language, admit being an AI, decline out-of-scope), the never-do list (no custom pricing, no roadmap promises, no tax/legal advice, no security documents, no fraud guarantees, no internal guidance), the active rows of `sales_policy_updates` sorted by area and title, then the **skill index** — one line per skill, descriptions only | identical for every session in the process; rendered once at startup |
 | `tools` | the eleven tool definitions from the registry, in registration order: `Skill`, `get_my_profile`, `list_products`, `get_pricing`, `search_knowledge`, `research`, `request_handoff`, `ask_customer`, `capture_lead`, `remember`, `read_attachment` | identical for every request in the process |
 | `messages[1]` system | **Customer block**: profile fields, products in use and the active Customer Memory as `[m<id>] kind — fact` lines, or the prospect notice | identical for the life of the session |
-| `messages[2:]` | working memory, oldest first, then the new customer message | append-only; rewritten only by clearing and compaction, which run rarely and only under pressure |
+| `messages[2:]` | working memory, oldest first, then the new customer message; a primed turn's `system` message sits just before its customer message | append-only; rewritten only by clearing and compaction, which run rarely and only under pressure |
 
 No dates, timestamps, or per-request identifiers appear anywhere before the newest
 message — the `[m<id>]` tags are stable fact ids, fixed in the frozen block for the life
@@ -152,6 +166,65 @@ first, public pricing, and when to offer a human. Four conversation skills —
 `discovery`, `pricing_conversation`, `security_compliance`, `objection_handling` — are
 the translation of the three Internal Knowledge documents into behaviour (see Handoff
 and Prospects below); a test runs every skill body through `leaks()`.
+
+### Priming — `priming.py`
+
+Priming puts the skills a turn calls for into the conversation before the model's first
+call, so that call is spent on real work instead of on a `Skill` load
+([ADR 0007](docs/adr/0007-a-decider-primes-the-skills-a-turn-calls-for.md)). It runs only when `priming` is on, and it never raises.
+
+1. **Candidates.** `skills_in_context()` (`skills.py`) reads which bodies working memory already holds,
+   by a fingerprint of each body in `tool` and `system` rows. A body Compaction folded
+   away no longer counts. Every other skill is a candidate. With none left, the turn is
+   recorded as `all_loaded` and the Decider is not called.
+2. **One request.** `prime()` asks the Decider one yes/no question per candidate, built
+   from the skill's own description: "Does the customer's latest message call for the
+   payments skill? …". The state is bounded and has the same keys every turn:
+   - the customer's message, first 4,000 characters;
+   - `new_prospect`;
+   - six profile fields and the products in use, or nothing for a prospect;
+   - the three most recent Customer Memory facts;
+   - the opening 500 characters of the previous reply;
+   - the skills already in context.
+3. **The rule.** `choose()` ranks by probability, ties by name. None at or above
+   `priming_threshold` primes nothing (`below_threshold`). One or two above it are primed.
+   Three or more keep the top one, and the second only when it is within `priming_margin`
+   of the top. `MAX_PRIMED` is 2: the main model never loaded more than two skills in a
+   turn. The defaults, 0.55 and 0.20, were fitted on the Golden Set (#18).
+4. **The message.** `primed_message()` (`skills.py`) builds one `system` message: a marker naming the
+   primed skills and saying `Skill` need not be called for them, then each body under
+   `## Skill: <name>`, most probable first. `run_turn` places it just before the
+   customer's message and appends it with the turn, so the next turn's prefix is the same
+   bytes (ADR 0005). A turn that fails appends neither.
+
+`prime()` returns a `Priming`: the skills, the message, or why there is none. It also
+returns the Decider's time and every probability it gave, which the Golden Set keeps.
+The reasons for priming nothing are:
+
+- Priming's own: `priming_off`, `all_loaded`, `below_threshold`, and `error` when
+  something in Priming itself broke;
+- the Decider's, passed through: `no_key`, `timeout`, `transport`, an HTTP status
+  (`unauthorized`, `rate_limited`, `overloaded`, `invalid_request`, or `http_<code>`),
+  `malformed`, `state_too_large`, `bad_state`, `no_questions`.
+
+The turn emits `primed {skills, skipped, decider_ms}` when Priming is on, and the
+customer's wait includes the Decider's time. A resumed turn after a handoff answer
+primes nothing: it answers no new customer message.
+
+Where a primed body never goes:
+
+- **Handoff evidence, the Compaction summariser and Reflection** read only `user` and
+  `assistant` rows, so a skill's wording can never stand in for the customer's.
+- **Splitting a turn in Compaction.** A turn starts at its primed message when it has one
+  (`context._turn_start`), so a recent window never keeps a turn without its
+  instructions. Primed skills count among the summary's `Active skills`.
+
+The model can still call `Skill` for anything, primed or not. `skill_already_in_context`
+answers a primed body with a note, and that holds with Priming off too.
+
+The Decider decides only which skills apply. Which products and topics a search filters
+on, and how a search question is phrased, stay with the main model: they need
+understanding and rewriting, and the Decider returns no text.
 
 ### Tools — `tools.py`, `app/tools/`
 
@@ -269,7 +342,8 @@ provider's numbers, and sizes use a characters/4 estimate.
    characters / 4) is under the high mark, the turn proceeds.
 3. **Compaction.** `context.compact()` chooses the recent window — the largest tail of
    the rows after the latest compaction within the window budget, moved forward to the
-   next customer message so the window starts a complete turn — and folds everything
+   start of the next turn (its primed message when it has one, else its customer message)
+   so the window starts a complete turn — and folds everything
    before it into one summary. The window budget is the smaller of `recent_window_tokens`
    and what the low-water mark leaves once the summary has its share
    (`low_water × context_budget_tokens − summary_max_tokens`), so a compacted session
@@ -281,8 +355,8 @@ provider's numbers, and sizes use a characters/4 estimate.
    the previous summary and a rendering of the folded rows (customer and agent text,
    tool calls as one line each, no tool output). `render_summary()` prefixes the
    `COMPACTION_PREFACE` and appends lines the harness writes itself, whatever the model
-   wrote: `Active skills: …` (the skills loaded in the folded rows plus those carried by
-   earlier summaries), `Facts established this session: …` (recomputed from the database
+   wrote: `Active skills: …` (the skills loaded or primed in the folded rows plus those
+   carried by earlier summaries), `Facts established this session: …` (recomputed from the database
    each time — a customer's memories recorded this session that are still active, a
    prospect's lead so far — so failed or retracted `remember` calls never appear and
    nothing is lost between compactions) and the attachments the customer sent, with ids.
@@ -428,6 +502,30 @@ adapters exist, which is what makes it a real seam:
   embeddings, and records every `CompletionRequest`. The recorded requests are the
   test suite's window into the prompt.
 
+### The Decider seam — `decider.py`
+
+The second path to a model, for typed questions rather than conversation. `Decider.ask(state,
+questions) -> Answers` takes a JSON state and named `YesNo` questions, and returns the
+probability of yes for each, or `Answers(skipped=<reason>)`. It never raises: a timeout,
+a transport error, a malformed body, or a state over the vendor's limits all come back as
+a reason. The `Provider` seam could not carry it. The vendor's API is not
+OpenAI-compatible and has no streaming, no tools and no text output, so a
+`CompletionRequest` would misdescribe both adapters. Two adapters make it a real seam:
+
+- **`TypeSafeDecider`** sends one POST to Jev (`TYPESAFE_BASE_URL`, default
+  `https://api.typesafe.ai/v1/systemone`). The key comes from `TYPESAFE_API_KEY`, the
+  model is `decider_model`, and every question is a `noul` question in one
+  request. The request makes one attempt with an explicit `decider_timeout_seconds`.
+  There is no vendor SDK, whose defaults are a 10 s timeout and retries up to 30 s. The
+  vendor documents limits — 64k tokens for the state plus every question, 32k for the
+  state plus the longest — but not what happens past them. So the adapter checks them
+  with the characters/4 estimate and refuses instead of sending.
+- **`ScriptedDecider`** plays canned answers or reasons and records every request. It is
+  the suite's Decider, as `ScriptedProvider` is its model.
+
+`build_decider(config)` returns a `NullDecider` when Priming is off (`priming_off`) or the
+key is missing (`no_key`), so neither is an exception at startup.
+
 ## Transport — `app/main.py`
 
 FastAPI owns one `Harness`, built at startup from the environment unless a test placed
@@ -440,14 +538,15 @@ its own on `app.state.harness` first.
 | `POST /sales-agent/stream` | runs a turn as SSE: `event: <name>\ndata: <json>\n\n` — `context_relieved {cleared, compacted, failed}`, `primed {skills, skipped, decider_ms}` (Priming on only), `thinking`, `tool_call {call_id, name, arguments}`, `skill_loaded {name}`, `tool_result {name, chars, cached, is_error}`, `hook_blocked {tool, hook}`, `text_delta`, `done`, `error`. Tool output and hook feedback are for the model and never reach the client |
 | `GET /api/customers` | sign-in selector: a `New prospect` entry (`customer_id: null, prospect: true`) first, then every customer with `prospect: false` |
 | `GET /api/leads?limit=N` | leads most recently updated first, `recommended_products` decoded |
-| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn, handoffs, leads captured, reflection passes; `tool_usage()` — calls per tool |
+| `GET /api/metrics?days=N` | `summary()` — turns, errors, avg latency, avg tokens, cache hit rate, tool rounds, tool-cache hits, provider calls per turn, handoffs, leads captured, reflection passes, primed turns, Priming's share and skip reasons, redundant `Skill` calls, first responses pairing a `Skill` call with a tool; `tool_usage()` — calls per tool |
+| `GET /` | the chat UI |
 
 `done` carries `sources` — the `(title, url)` pairs collected by `source_extraction` — and the UI renders them as links under the reply; `/sales-agent/chat` returns them in `ChatResponse.sources`.
-| `GET /` | the chat UI |
 
 The UI (`static/index.html`) is a single page: a sign-in-as-customer / new-prospect selector, a
 streamed conversation with a Claude Code-style activity list above each reply (one row
-per tool call: skill loaded, result size, cached, or blocked-by-hook), and per-reply
+per tool call: skill loaded, result size, cached, or blocked-by-hook; a `priming` row with
+the skills primed, or why none, and the Decider's time), and per-reply
 latency / token / cache-hit / tool-round figures. **End conversation** posts to
 `/sales-agent/end` and starts a fresh session with a note on how many facts were kept.
 The session id lives in `localStorage` per customer.
@@ -561,7 +660,10 @@ older runtime database lacks (`ALTER TABLE … ADD COLUMN`, driven from the sche
 average latency, average prompt / completion / reasoning tokens, total cache hit and
 miss tokens, `cache_hit_rate = hit / (hit + miss)`, tool rounds, tool-cache hits,
 provider calls per turn, sub-agent delegations and tokens, handoffs confirmed and
-declined, leads captured, and reflection passes; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON.
+declined, leads captured, reflection passes, and Priming's numbers: primed turns,
+`priming_share` (of the turns Priming ran for), `priming_skip_reasons` (turns with Priming
+off left out), redundant `Skill` calls and first responses that paired a `Skill` call with a
+tool; `tool_usage(days)` counts calls per tool. Each row also keeps the turn's tools, skills and hook outcomes as JSON.
 
 Each row also records what Priming did and how the turn began. Priming's columns are the
 Decider's time, the skills primed, why nothing was primed, and the redundant `Skill`
@@ -579,11 +681,12 @@ always starts with a harness over a `ScriptedProvider` and a `ScriptedDecider` (
 the suite runs with no `.env` and no keys. The 19 evaluation cases carry the `eval`
 marker and are deselected by default (`addopts = -m "not eval"`).
 
-Two seams only ([issue #1](https://github.com/JLLeo/Stripe_Copilot/issues/1), Testing
-Decisions): the **HTTP API** is the test surface and the **Provider** is the
-substitution point. A test scripts the provider, drives the endpoints with FastAPI's
-`TestClient`, then asserts on the response, the recorded requests, and the runtime
-database. The DeepSeek adapter's stream handling is covered against a stub of the
+Three seams ([issue #1](https://github.com/JLLeo/Stripe_Copilot/issues/1) and
+[#14](https://github.com/JLLeo/Stripe_Copilot/issues/14), Testing Decisions): the **HTTP API**
+is the test surface, and the **Provider** and the **Decider** are the substitution points.
+A test scripts the provider and, for Priming, the Decider, drives the endpoints with
+FastAPI's `TestClient`, then asserts on the response, the recorded requests to both, and
+the runtime database. The DeepSeek adapter's stream handling is covered against a stub of the
 OpenAI client.
 
 ## Evaluation — `evals/`

@@ -201,7 +201,7 @@ def test_the_scripted_decider_plays_answers_in_order_and_records_what_it_was_ask
     assert third.skipped == "transport", "a scripted exception is the adapter's failure path, not a test crash"
 
     assert [state for state, _ in decider.requests] == [STATE, {"customer_message": "and Terminal?"}, STATE]
-    assert [sorted(q) for _, q in decider.requests] == [sorted(QUESTIONS), ["terminal"], sorted(QUESTIONS)],         "every request is kept with the questions it carried, which is how later tickets assert what was asked"
+    assert [sorted(q) for _, q in decider.requests] == [sorted(QUESTIONS), ["terminal"], sorted(QUESTIONS)],         "every request is kept with the questions it carried, which is how a test asserts what was asked"
 
     with pytest.raises(AssertionError):
         decider.ask(STATE, QUESTIONS)  # the script ran out: fail loudly, as ScriptedProvider does
@@ -237,7 +237,7 @@ def test_build_decider_needs_both_the_switch_and_the_key(monkeypatch):
 # =========================================================================
 def test_the_priming_settings_come_from_the_configuration_object(monkeypatch):
     default = HarnessConfig()
-    assert default.priming is False, "off until #16 wires it into the turn"
+    assert default.priming is False, "off by default: the verdict (#19) leaves turning it on to a decision (ADR 0007)"
     assert (default.decider_model, default.decider_timeout_seconds) == ("jev-latest", 0.7)
     assert (default.priming_threshold, default.priming_margin) == (0.55, 0.20), "fitted in #18"
 

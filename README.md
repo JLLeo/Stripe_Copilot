@@ -7,6 +7,8 @@ only builds the request, moves bytes, and guards the edges.
 A customer signs in — or starts as a prospect — asks a question, and watches the agent
 load the relevant skill, search Stripe's public documentation (or hand a hard question to
 a research sub-agent), look up the profile, catalogue or pricing, and answer with sources.
+With **Priming** on, a fast second model names the skills the turn calls for before the
+agent's first call, so that call goes to real work instead of fetching instructions.
 When a request is ambiguous it asks a clarifying question with clickable options; when the
 matter needs a person it proposes a handoff to one of seven teams and waits for the
 customer's yes; no reply reaches the customer with a placeholder or a line from an
@@ -23,7 +25,10 @@ judge's score and a zero-leak check.
 The design was settled first — a glossary and six decision records — then built ticket by
 ticket on the same branch ([issue #1](https://github.com/JLLeo/Stripe_Copilot/issues/1)
 is the spec; #2–#13 the tickets), each with tests at the HTTP seam and a live check
-against the model.
+against the model. Priming followed the same way: a spec
+([#14](https://github.com/JLLeo/Stripe_Copilot/issues/14)), tickets #15–#20, a Golden Set
+and a before-and-after verdict, and a seventh decision record whose consequences are the
+measured numbers.
 
 ---
 
@@ -38,14 +43,15 @@ customer message  ─►  /sales-agent/stream
              │  1. SessionStart (first     │   customer block frozen from the
              │     contact only)           │   Customer Profile + Customer Memory
              │  2. relieve pressure        │   clear spent results, compact — only past the high-water mark
-             │  3. assemble request        │   static prompt · tools · customer · memory; a long message → Attachment
-             │  4. Provider.complete       │   DeepSeek, streamed
-             │  5. tool calls?             │   PreToolUse → run → PostToolUse,
+             │  3. Priming (when on)       │   the Decider names the skills the turn calls for; their bodies go in first
+             │  4. assemble request        │   static prompt · tools · customer · memory; a long message → Attachment
+             │  5. Provider.complete       │   DeepSeek, streamed
+             │  6. tool calls?             │   PreToolUse → run → PostToolUse,
              │     └─ round again          │   Skill / search_knowledge / research / request_handoff / …
              │     └─ or pause             │   a handoff waits for the customer's answer
-             │  6. Stop hooks on the reply │   anti_placeholder, internal_canary → rewrite
-             │  7. append every message    │   working memory
-             │  8. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks
+             │  7. Stop hooks on the reply │   anti_placeholder, internal_canary → rewrite
+             │  8. append every message    │   working memory
+             │  9. record TurnRecord       │   tokens, cache hit/miss, tools, skills, hooks, Priming
              └─────────────────────────────┘
    POST /sales-agent/end ──► SessionEnd: a reflection sub-agent keeps what the agent did not record
                           │
@@ -54,7 +60,8 @@ customer message  ─►  /sales-agent/stream
 ```
 
 Every request is built in the same order — static system prompt, the eleven tool
-definitions, customer block, working memory — and nothing before the newest message is
+definitions, customer block, working memory (with a primed turn's skills just before its
+customer message) — and nothing before the newest message is
 rewritten except by clearing and compaction, rarely and only under pressure. DeepSeek's
 context cache is a prefix match, so on a real two-turn session 1,024 of the second turn's
 1,169 prompt tokens were served from cache, and 89–92% of a turn with skills and tools.
@@ -77,7 +84,9 @@ stripe-sales-copilot/
 │   │   ├── scripted.py       # Test adapter: plays a script, records every request
 │   │   ├── prompt.py         # Static system prompt (incl. skill index), customer block, fixed order
 │   │   ├── tools.py          # Tool = function + JSON schema; registry; argument checks
-│   │   ├── skills.py         # SKILL.md loader + the Skill tool
+│   │   ├── skills.py         # SKILL.md loader + the Skill tool; a body enters a session at most once
+│   │   ├── decider.py        # The Decider seam: typed yes/no questions → probabilities; Jev adapter + scripted fake
+│   │   ├── priming.py        # Priming: ask the Decider, apply the selection rule, build the primed system message
 │   │   ├── hooks.py          # The five hook events and their dispatch; TurnState; Allow / Deny / Replace / Pause
 │   │   ├── guardrails.py     # turn_budget, result_cap, turn_result_budget, tool cache, anti_placeholder, internal_canary, leaks()
 │   │   ├── context.py        # Context Budget: attachment stubs, clearing, compaction with a rolling summary (ADR 0006)
@@ -118,8 +127,8 @@ stripe-sales-copilot/
 │   ├── thresholds.py         # `python -m evals.thresholds`: Priming's threshold and margin, fitted on dev, published on held-out
 │   ├── verdict.py            # `python -m evals.verdict`: faster without being worse? Turn by turn, Priming off against on
 │   └── reports/              # latest.md (the last `pytest -m eval` run), the Golden Set runs, the behaviour runs behind
-│                             #   the threshold fit, and priming-thresholds.md; each with a JSON twin
-├── docs/adr/                 # Six architecture decision records
+│                             #   the threshold fit and the verdict, priming-thresholds.md and priming-verdict.md; each with a JSON twin
+├── docs/adr/                 # Seven architecture decision records
 ├── CONTEXT.md                # Domain glossary
 ├── ARCHITECTURE.md           # How the code implements the decisions, with the measured numbers
 ├── requirements.txt
@@ -136,6 +145,7 @@ pip install -r requirements.txt
 # .env
 DEEPSEEK_API_KEY=sk-...      # deepseek-v4-pro for the conversation, deepseek-flash for sub-agents
 OPENAI_API_KEY=sk-...        # embeddings only (text-embedding-3-small)
+TYPESAFE_API_KEY=...         # the Decider (Jev); only needed with Priming on (HARNESS_PRIMING=1)
 
 # Two databases: data/seed.db (tracked, read-only: customers, products, usage, policies) and
 # data/runtime.db (gitignored, created on first start: sessions, working memory, attachments,
@@ -158,7 +168,7 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash)
 `HARNESS_MILVUS_URI`, `SEED_DB_PATH`, `RUNTIME_DB_PATH`; and the context thresholds `HARNESS_TURN_RESULT_BUDGET_CHARS` (24000),
 `HARNESS_ATTACHMENT_THRESHOLD_CHARS` (8000), `HARNESS_CONTEXT_BUDGET_TOKENS` (96000), `HARNESS_HIGH_WATER` (0.75),
 `HARNESS_LOW_WATER` (0.40), `HARNESS_SUMMARY_MAX_TOKENS` (800), `HARNESS_RECENT_WINDOW_TOKENS` (24000) — see
-"Context management".
+"Context management"; and Priming's settings, `HARNESS_PRIMING` and the Decider's — see "Priming".
 
 ## API
 
@@ -171,7 +181,7 @@ Optional environment: `HARNESS_MAIN_MODEL`, `HARNESS_SUB_MODEL` (deepseek-flash)
 | `POST` | `/sales-agent/stream` | One turn as SSE: `context_relieved`? (spent results cleared / working memory compacted before this turn), `primed`? (with Priming on: the skills put in, or why none), `thinking`?, then per tool call `tool_call` + (`skill_loaded` \| `tool_result` \| `hook_blocked` \| `handoff_pending` \| `ask_customer`), with `subagent_started` / `subagent_tool_call` / `subagent_finished` inside a `research` call, `text_delta`*, then `done` or `error`. `done.pending_handoff` is set when the turn stopped for a confirmation, `done.ask_customer` when it ended with a question and options. Text is streamed only after the Stop hooks approve it |
 | `POST` | `/sales-agent/confirm-handoff` | `{session_id, accept, handoff_id?}` — the customer's answer to a pending handoff; the agent's follow-up streams back as SSE. `404` when nothing is pending, `409` for a stale proposal |
 | `POST` | `/sales-agent/end` | `{session_id}` — the customer ends the conversation. `SessionEnd` runs the reflection sub-agent for a customer (never for a prospect) and returns `{reflected, remembered, merged}`; the session takes no more turns (`409`). `404` unknown session, `409` already ended |
-| `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, leads captured, reflection passes, calls per tool |
+| `GET` | `/api/metrics?days=7` | Turns, errors, latency, tokens per turn, prompt-cache hit rate, tool rounds, tool-cache hits, sub-agent delegations and tokens, handoffs confirmed / declined, leads captured, reflection passes, primed turns, Priming's share and skip reasons, redundant `Skill` calls, paired first responses, calls per tool |
 
 Request body for both chat endpoints:
 
@@ -190,7 +200,8 @@ or **New prospect**; **New conversation** starts a fresh session for the same cu
 **End conversation** ends it (reflection runs, and the next session opens with a note on how
 many facts were kept). Each reply shows a Claude Code-style activity list above it — one row
 per tool call (skill loaded, result size, served from cache, blocked by a hook), sub-agent
-searches as they happen, a `context` row when the turn cleared or compacted — then the text
+searches as they happen, a `context` row when the turn cleared or compacted, a `priming` row
+with the skills primed (or why none) and the Decider's time — then the text
 (streamed once the Stop hooks approved it), the sources as links, and the turn's latency,
 tokens, cache hit and tool rounds. A clarifying question renders its options as clickable
 chips; a handoff proposal renders a card with *Yes, connect me* / *No, keep going*. The
@@ -204,7 +215,8 @@ pytest -m eval    # the evaluation suite: 19 sessions against DeepSeek, ~5 min, 
 ```
 
 All behavioural tests drive the HTTP API with a `ScriptedProvider` standing in for
-DeepSeek. The fake records every request the harness built, which is how tests assert
+DeepSeek and a `ScriptedDecider` standing in for Jev. The fakes record every request the
+harness built, which is how tests assert
 things the response never shows — that the prefix is byte-identical between turns,
 what the customer block contained, that no timestamp leaked into the cached prefix.
 
@@ -472,11 +484,13 @@ turns faster is inside the runs' own variation.**
 ## Skills and tools
 
 Skills are `skills/<name>/SKILL.md` files — YAML frontmatter (`name`, `description`) and a
-markdown body. The static prompt carries only the descriptions; the body enters the
-conversation when the model calls `Skill(name)`, so the model decides when a skill
-applies — or, with Priming on (`HARNESS_PRIMING=1`, off by default), before its first call,
-when the Decider names it. Either way a body enters a conversation at most once. Several can be loaded in one round. Skills recommend tools; they never restrict
-them. Adding a behaviour is adding a file.
+markdown body. The static prompt carries only the descriptions. A body enters the
+conversation in one of two ways. The model calls `Skill(name)` when it decides a skill
+applies. Or, with Priming on, the harness puts it in before the model's first call because
+the Decider named it (see Priming). Either way a body enters a Session at most once, and
+several can arrive in one round. Skills recommend tools; they never restrict them.
+Adding a behaviour is adding a file; with Priming on, its description is also the
+Decider's question, so give it Golden Set labels and refit the threshold.
 
 | Tool | What the model gets |
 |---|---|
@@ -513,6 +527,73 @@ customer never sees it. The same checks guard the two other things the customer 
 clarifying question and its options (`clean_question`, denied with feedback) and the text the
 model writes beside a handoff proposal (the harness's own proposal stands in). An existing
 `data/runtime.db` is upgraded in place on startup when the metrics table gains columns.
+
+## Priming
+
+A turn costs a few seconds per sequential model call — #18 measured a round that only
+loaded skills at about 3 s — and the first call was often spent only on loading a skill. In
+10 of the 19 behaviour cases, the first response of the first turn was a `Skill` call and
+nothing the customer could use. **Priming** removes that round
+([ADR 0007](docs/adr/0007-a-decider-primes-the-skills-a-turn-calls-for.md)). Before the first model call, the **Decider** reads the turn and names
+the skills it calls for. The harness puts their bodies into the conversation, so DeepSeek's
+first call goes to a search, a price lookup or an answer.
+
+The Decider is Jev, TypeSafe AI's "System One". It is a typed model, not a chat model: it
+answers questions with probabilities and never writes text, so nothing it returns reaches the
+customer. It is not the keyword classifier ADR 0001 removed. That was a rule choosing the
+scenario and forcing the tools. The Decider is a model analysing what the customer asked to
+name the skills that apply. The main model still chooses every action.
+
+1. **One request, one question per skill.** Each skill not yet in the conversation gets one
+   yes/no question, built from its one-line description. The Decider reads a small, bounded
+   state:
+   - the message;
+   - whether the customer is a new prospect;
+   - six profile fields and the products in use;
+   - the three latest Customer Memory facts;
+   - the opening of the previous reply;
+   - the skills already loaded.
+2. **A fixed rule on the probabilities.** Skills at or above 0.55 are primed, at most two.
+   When three or more clear it, the second is kept only within 0.20 of the top. Both numbers
+   were fitted on the Golden Set (see Evaluation).
+3. **One persisted `system` message**, just before the customer's message. A marker names
+   the primed skills and says `Skill` need not be called for them.
+   - It is `system`, not `user`, so a skill's wording can never pass for the customer's in
+     handoff evidence, the compaction summary or reflection.
+   - It is stored with the turn, so the next turn's prefix stays byte-identical and cached.
+4. **Only ever added.** Every tool stays available and the model can still load any skill
+   itself. A body enters a Session at most once: a `Skill` call for a body already there
+   gets an "already in context" note. If the Decider is slow (0.7 s timeout, no
+   retry), fails, has no key or names nothing with confidence, the turn runs exactly as it
+   would without Priming.
+
+The Decider takes over only that one judgment. Which products a search filters on and how a
+search question is worded stay with the main model. Deterministic guardrails — handoff
+evidence, the internal-material check, the round budget — stay deterministic; a network call
+would only add time.
+
+**Configuration.** Priming is off by default. Turn it on with `HARNESS_PRIMING=1` and set
+`TYPESAFE_API_KEY`. Optional:
+
+- `HARNESS_DECIDER_MODEL` (`jev-latest`);
+- `HARNESS_DECIDER_TIMEOUT_SECONDS` (0.7);
+- `HARNESS_PRIMING_THRESHOLD` (0.55) and `HARNESS_PRIMING_MARGIN` (0.20);
+- `TYPESAFE_BASE_URL`.
+
+**What you can see.** The stream sends `primed {skills, skipped, decider_ms}`, and the UI
+shows it as a `priming` row above the reply. Each turn's metrics row records:
+
+- the Decider's time, the skills primed, or why none were;
+- redundant `Skill` calls;
+- whether the first response paired a `Skill` call with a tool that skill informs;
+- the skills and tools the first response asked for.
+
+`/api/metrics` reports primed turns, Priming's share of the turns it ran for, the skip
+reasons, redundant calls and paired first responses.
+
+**What it bought** is measured in The Priming verdict above: quality held and about a
+third of the tool rounds went, but the change in turn latency is not yet separated from the
+provider's drift between runs.
 
 ## Handoff
 
@@ -618,6 +699,9 @@ narrows the search and a false match would hide the right documents.
 
 ## Measured on the live model
 
+Priming's effect is measured across the nineteen behaviour cases, not on a single session:
+see The Priming verdict above. The sessions below ran with Priming off.
+
 `deepseek-v4-pro`, thinking enabled, one customer session:
 
 | | Turn 1 | Turn 2 |
@@ -678,6 +762,6 @@ cache), and everything the sub-agent read stayed out of the main context.
 
 ## Documents
 
-- [`CONTEXT.md`](CONTEXT.md) — the glossary: Harness, Turn, Guardrail, Hook, Skill, Handoff, Customer Memory, Compaction, …
-- [`docs/adr/`](docs/adr/) — why the model decides and rules only guard (0001), why the harness is hand-built on DeepSeek (0002), why internal knowledge never enters a customer conversation (0003), hybrid retrieval via a sibling collection (0004), the append-only prompt prefix (0005), tiered context-pressure relief (0006)
+- [`CONTEXT.md`](CONTEXT.md) — the glossary: Harness, Turn, Guardrail, Hook, Skill, Decider, Priming, Handoff, Customer Memory, Compaction, Golden Set, …
+- [`docs/adr/`](docs/adr/) — why the model decides and rules only guard (0001), why the harness is hand-built on DeepSeek (0002), why internal knowledge never enters a customer conversation (0003), hybrid retrieval via a sibling collection (0004), the append-only prompt prefix (0005), tiered context-pressure relief (0006), why a Decider primes the skills a turn calls for and why that is not the router 0001 removed (0007)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the current code implements them

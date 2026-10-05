@@ -11,8 +11,8 @@ customer's new message
 (`skills.primed_message`), persisted with the turn so the next turn's prefix is
 the same bytes (ADR 0005).
 
-The harness does no intent analysis of its own: the Decider reads the message
-and names skills; this module only applies a fixed rule to the probabilities.
+The harness makes no judgment of its own about the message: the Decider reads
+it and names skills; this module only applies a fixed rule to the probabilities.
 
 Two lines bound it:
 - It only adds context. The model keeps every tool, `tool_choice` is never
